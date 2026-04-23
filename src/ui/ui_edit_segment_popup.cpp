@@ -1,4 +1,6 @@
+#include "../lvgl_includes.h"
 #include "ui_edit_segment_popup.h"
+#include "ui_keypad.h"
 
 static void on_save(lv_event_t *e) {
     lv_obj_t *popup = (lv_obj_t *)lv_event_get_user_data(e);
@@ -15,10 +17,6 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, FiringSegment& segment) {
     lv_obj_set_size(popup, 280, 220);
     lv_obj_center(popup);
     
-    // Optional: make it somewhat modal visually
-    // In LVGL 8/9, true modality is usually done by creating on lv_layer_top()
-    // but a centered object on the current screen is often sufficient for simple apps.
-
     // Target Temp
     lv_obj_t *lbl_target = lv_label_create(popup);
     lv_label_set_text(lbl_target, "Target Temp (C):");
@@ -26,6 +24,7 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, FiringSegment& segment) {
     lv_obj_t *ta_target = lv_textarea_create(popup);
     lv_obj_set_size(ta_target, 100, 35);
     lv_obj_align_to(ta_target, lbl_target, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_add_event_cb(ta_target, ui_ta_event_cb, LV_EVENT_ALL, NULL);
 
     // Ramp Rate
     lv_obj_t *lbl_rate = lv_label_create(popup);
@@ -34,6 +33,7 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, FiringSegment& segment) {
     lv_obj_t *ta_rate = lv_textarea_create(popup);
     lv_obj_set_size(ta_rate, 100, 35);
     lv_obj_align_to(ta_rate, lbl_rate, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_add_event_cb(ta_rate, ui_ta_event_cb, LV_EVENT_ALL, NULL);
 
     // Soak Time
     lv_obj_t *lbl_soak = lv_label_create(popup);
@@ -42,6 +42,7 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, FiringSegment& segment) {
     lv_obj_t *ta_soak = lv_textarea_create(popup);
     lv_obj_set_size(ta_soak, 100, 35);
     lv_obj_align_to(ta_soak, lbl_soak, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_add_event_cb(ta_soak, ui_ta_event_cb, LV_EVENT_ALL, NULL);
 
     // Buttons
     lv_obj_t *btn_save = lv_btn_create(popup);

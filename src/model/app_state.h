@@ -15,4 +15,6 @@ struct AppState {
 // Global application state instance
 extern AppState appState;
 
+void app_state_init();
+
 #endif // APP_STATE_H

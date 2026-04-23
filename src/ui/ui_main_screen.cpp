@@ -1,3 +1,4 @@
+#include "../lvgl_includes.h"
 #include "ui_main_screen.h"
 #include "ui.h"
 #include "../model/app_state.h"

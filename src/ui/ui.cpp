@@ -1,8 +1,13 @@
+#include "../lvgl_includes.h"
 #include "ui.h"
 #include "ui_main_screen.h"
 #include "ui_program_config_screen.h"
+#include "ui_keypad.h"
 
 void ui_init() {
+    // Initialize the global keypad first
+    ui_keypad_init();
+
     // Create the main screen initially
     ui_main_screen_create();
 }
