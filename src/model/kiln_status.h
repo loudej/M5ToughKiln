@@ -2,6 +2,7 @@
 #define KILN_STATUS_H
 
 #include <cstdint>
+#include <string>
 
 enum class KilnState {
     IDLE,
@@ -17,7 +18,7 @@ struct KilnStatus {
     float targetTemperature = 25.0f;
     uint32_t segmentTimeElapsed = 0;
     uint32_t totalTimeElapsed = 0;
-    const char* activeProgramName = "None";
+    std::string activeProgramName = "None";
 };
 
 #endif // KILN_STATUS_H

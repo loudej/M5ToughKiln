@@ -15,6 +15,9 @@ void ui_init() {
 void ui_switch_to_main_screen() {
     // Logic to switch screens
     lv_scr_load(ui_main_screen_get());
+    if (ui_program_config_screen_get() != NULL) {
+        lv_obj_del(ui_program_config_screen_get());
+    }
 }
 
 void ui_switch_to_program_config_screen() {

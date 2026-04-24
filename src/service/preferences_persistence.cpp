@@ -1,4 +1,5 @@
 #include "preferences_persistence.h"
+#include "../model/profile_generator.h"
 #include <Arduino.h>
 
 bool PreferencesPersistence::loadCustomPrograms(std::vector<FiringProgram>& programs) {
@@ -33,6 +34,38 @@ bool PreferencesPersistence::loadCustomPrograms(std::vector<FiringProgram>& prog
         programs.push_back(p);
     }
 
+    // Load active program and predefined states
+    appState.activeProgramIndex = prefs.getInt("active_prog", 0);
+    if (appState.activeProgramIndex < 0) appState.activeProgramIndex = 0;
+    
+    for (int i = 0; i < 4; i++) {
+        char key[16];
+        sprintf(key, "pre%d_cone", i);
+        appState.predefinedPrograms[i].origCone = prefs.getString(key, i < 2 ? "08" : "5").c_str();
+        sprintf(key, "pre%d_candle", i);
+        appState.predefinedPrograms[i].origCandle = prefs.getInt(key, 0);
+        sprintf(key, "pre%d_soak", i);
+        appState.predefinedPrograms[i].origSoak = prefs.getInt(key, 0);
+        
+        // Regenerate the program logic based on the loaded inputs
+        if (i == 0) appState.predefinedPrograms[0] = ProfileGenerator::generateFastBisque(appState.predefinedPrograms[0].origCone, appState.predefinedPrograms[0].origCandle, appState.predefinedPrograms[0].origSoak);
+        else if (i == 1) appState.predefinedPrograms[1] = ProfileGenerator::generateSlowBisque(appState.predefinedPrograms[1].origCone, appState.predefinedPrograms[1].origCandle, appState.predefinedPrograms[1].origSoak);
+        else if (i == 2) appState.predefinedPrograms[2] = ProfileGenerator::generateFastGlaze(appState.predefinedPrograms[2].origCone, appState.predefinedPrograms[2].origCandle, appState.predefinedPrograms[2].origSoak);
+        else if (i == 3) appState.predefinedPrograms[3] = ProfileGenerator::generateSlowGlaze(appState.predefinedPrograms[3].origCone, appState.predefinedPrograms[3].origCandle, appState.predefinedPrograms[3].origSoak);
+    }
+
+    if (appState.activeProgramIndex <= 3) {
+        appState.status.activeProgramName = appState.predefinedPrograms[appState.activeProgramIndex].name;
+    } else {
+        int customIdx = appState.activeProgramIndex - 4;
+        if (customIdx >= 0 && customIdx < appState.customPrograms.size()) {
+            appState.status.activeProgramName = appState.customPrograms[customIdx].name;
+        } else {
+             appState.activeProgramIndex = 0;
+             appState.status.activeProgramName = appState.predefinedPrograms[0].name;
+        }
+    }
+
     prefs.end();
     return true;
 }
@@ -64,6 +97,19 @@ bool PreferencesPersistence::saveCustomPrograms(const std::vector<FiringProgram>
             sprintf(key, "p%d_s%d_st", i, j);
             prefs.putUInt(key, seg.soakTime);
         }
+    }
+
+    // Save active program and predefined states
+    prefs.putInt("active_prog", appState.activeProgramIndex);
+    
+    for (int i = 0; i < 4; i++) {
+        char key[16];
+        sprintf(key, "pre%d_cone", i);
+        prefs.putString(key, appState.predefinedPrograms[i].origCone.c_str());
+        sprintf(key, "pre%d_candle", i);
+        prefs.putInt(key, appState.predefinedPrograms[i].origCandle);
+        sprintf(key, "pre%d_soak", i);
+        prefs.putInt(key, appState.predefinedPrograms[i].origSoak);
     }
 
     prefs.end();

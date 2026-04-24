@@ -13,5 +13,5 @@ void app_state_init() {
     
     // Set default active
     appState.activeProgramIndex = 0;
-    appState.status.activeProgramName = appState.predefinedPrograms[0].name.c_str();
+    appState.status.activeProgramName = appState.predefinedPrograms[0].name;
 }

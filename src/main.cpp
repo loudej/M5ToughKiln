@@ -14,7 +14,7 @@ static lv_color_t* buf;
 // Core Engine Components
 static MockKilnHardware hardware;
 static FiringController controller(&hardware);
-static PreferencesPersistence persistence;
+PreferencesPersistence persistence;
 
 // LVGL display flush callback
 void my_disp_flush(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)

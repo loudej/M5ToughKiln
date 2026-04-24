@@ -37,6 +37,10 @@ void ui_ta_event_cb(lv_event_t * e) {
         ui_keypad_set_target(ta);
     } else if (code == LV_EVENT_DEFOCUSED) {
         ui_keypad_hide();
+    } else if (code == LV_EVENT_DELETE) {
+        if (global_kb && lv_keyboard_get_textarea(global_kb) == ta) {
+            lv_keyboard_set_textarea(global_kb, NULL);
+        }
     }
 }
 

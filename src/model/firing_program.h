@@ -15,6 +15,11 @@ public:
     std::string name;
     std::vector<FiringSegment> segments;
     bool isCustom;
+
+    // Original inputs for predefined programs to restore UI state
+    std::string origCone;
+    int origCandle;
+    int origSoak;
 };
 
 #endif // FIRING_PROGRAM_H

@@ -8,17 +8,20 @@ float ProfileGenerator::getTempForCone(const std::string& cone) {
     return 1000.0f; // Default fallback
 }
 
-FiringProgram ProfileGenerator::generateFastBisque(const std::string& cone, float candleHours, float soakMinutes) {
+FiringProgram ProfileGenerator::generateFastBisque(const std::string& cone, int candleMinutes, int soakMinutes) {
     FiringProgram prog;
     prog.name = "Fast Bisque (Cone " + cone + ")";
     prog.isCustom = false;
+    prog.origCone = cone;
+    prog.origCandle = candleMinutes;
+    prog.origSoak = soakMinutes;
     
     float peakTemp = getTempForCone(cone);
 
     // Placeholder Logic:
     // 1. Candle (optional)
-    if (candleHours > 0) {
-        prog.segments.push_back({100.0f, 100.0f, (uint32_t)(candleHours * 60.0f)}); 
+    if (candleMinutes > 0) {
+        prog.segments.push_back({100.0f, 100.0f, (uint32_t)(candleMinutes)}); 
     }
     
     // 2. Fast ramp to peak
@@ -27,16 +30,19 @@ FiringProgram ProfileGenerator::generateFastBisque(const std::string& cone, floa
     return prog;
 }
 
-FiringProgram ProfileGenerator::generateSlowBisque(const std::string& cone, float candleHours, float soakMinutes) {
+FiringProgram ProfileGenerator::generateSlowBisque(const std::string& cone, int candleMinutes, int soakMinutes) {
     FiringProgram prog;
     prog.name = "Slow Bisque (Cone " + cone + ")";
     prog.isCustom = false;
+    prog.origCone = cone;
+    prog.origCandle = candleMinutes;
+    prog.origSoak = soakMinutes;
     
     float peakTemp = getTempForCone(cone);
 
     // Placeholder Logic:
-    if (candleHours > 0) {
-        prog.segments.push_back({100.0f, 50.0f, (uint32_t)(candleHours * 60.0f)}); 
+    if (candleMinutes > 0) {
+        prog.segments.push_back({100.0f, 50.0f, (uint32_t)(candleMinutes)}); 
     }
     
     // 1. Slow initial ramp (water smoking)
@@ -49,15 +55,18 @@ FiringProgram ProfileGenerator::generateSlowBisque(const std::string& cone, floa
     return prog;
 }
 
-FiringProgram ProfileGenerator::generateFastGlaze(const std::string& cone, float candleHours, float soakMinutes) {
+FiringProgram ProfileGenerator::generateFastGlaze(const std::string& cone, int candleMinutes, int soakMinutes) {
     FiringProgram prog;
     prog.name = "Fast Glaze (Cone " + cone + ")";
     prog.isCustom = false;
+    prog.origCone = cone;
+    prog.origCandle = candleMinutes;
+    prog.origSoak = soakMinutes;
     
     float peakTemp = getTempForCone(cone);
 
-    if (candleHours > 0) {
-         prog.segments.push_back({100.0f, 150.0f, (uint32_t)(candleHours * 60.0f)});
+    if (candleMinutes > 0) {
+         prog.segments.push_back({100.0f, 150.0f, (uint32_t)(candleMinutes)});
     }
     
     // Fast ramp to peak
@@ -66,15 +75,18 @@ FiringProgram ProfileGenerator::generateFastGlaze(const std::string& cone, float
     return prog;
 }
 
-FiringProgram ProfileGenerator::generateSlowGlaze(const std::string& cone, float candleHours, float soakMinutes) {
+FiringProgram ProfileGenerator::generateSlowGlaze(const std::string& cone, int candleMinutes, int soakMinutes) {
     FiringProgram prog;
     prog.name = "Slow Glaze (Cone " + cone + ")";
     prog.isCustom = false;
+    prog.origCone = cone;
+    prog.origCandle = candleMinutes;
+    prog.origSoak = soakMinutes;
     
     float peakTemp = getTempForCone(cone);
 
-    if (candleHours > 0) {
-         prog.segments.push_back({100.0f, 100.0f, (uint32_t)(candleHours * 60.0f)});
+    if (candleMinutes > 0) {
+         prog.segments.push_back({100.0f, 100.0f, (uint32_t)(candleMinutes)});
     }
     
     // Slower ramp for larger pieces or tricky glazes
@@ -82,3 +94,4 @@ FiringProgram ProfileGenerator::generateSlowGlaze(const std::string& cone, float
 
     return prog;
 }
+
