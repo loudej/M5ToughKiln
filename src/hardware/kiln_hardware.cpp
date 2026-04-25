@@ -1,47 +1,38 @@
 #include "kiln_hardware.h"
 #include <Arduino.h>
-#include <Wire.h>
 #include <M5Unified.h>
-#include <cmath>
 
 // ── KMeterISOHardware ────────────────────────────────────────────────────────
-// Driven by M5UnitUnified / M5HAL — bypasses Arduino Wire's broken
-// repeated-start handling. M5Unified manages its own internal-bus driver, so
-// Arduino's Wire object is free to be repurposed for Port A.
 
 void KMeterISOHardware::init() {
     auto sda = M5.getPin(m5::pin_name_t::port_a_sda);
     auto scl = M5.getPin(m5::pin_name_t::port_a_scl);
     M5.Log.printf("KMeter ISO: Port A SDA=%u SCL=%u\n", sda, scl);
 
-    Wire.begin(sda, scl, 100000U);
-
-    // ACK probe loop — gives the unit time to come up after Port A is powered.
-    for (int i = 0; i < 10; ++i) {
-        Wire.beginTransmission(unit.address());
-        if (Wire.endTransmission() == 0) break;
-        delay(10);
-    }
-
-    if (!units.add(unit, Wire) || !units.begin()) {
+    if (!kmeter.begin(sda, scl)) {
         M5.Log.println("KMeter ISO: NOT found — check Port A connection");
         initialized = false;
         return;
     }
 
-    M5.Log.println("KMeter ISO: ready");
+    uint8_t fw = 0;
+    if (kmeter.readFirmwareVersion(fw)) {
+        M5.Log.printf("KMeter ISO: ready (FW=0x%02X)\n", fw);
+    } else {
+        M5.Log.println("KMeter ISO: ready (FW read failed, but bus is up)");
+    }
     initialized = true;
 }
 
 float KMeterISOHardware::readTemperature() {
     if (!initialized) return lastTemp;
 
-    // Drives the periodic measurement state machine inside the library.
-    units.update();
-
-    float t = unit.temperature();
-    if (!std::isnan(t)) {
-        lastTemp = t;
+    uint8_t status = 0;
+    if (kmeter.readStatus(status) && status == 0) {
+        float t;
+        if (kmeter.readCelsius(t)) {
+            lastTemp = t;
+        }
     }
     return lastTemp;
 }
@@ -56,7 +47,6 @@ bool KMeterISOHardware::isRelayOn() const {
 }
 
 // ── MockKilnHardware ─────────────────────────────────────────────────────────
-
 
 void MockKilnHardware::init() {
     lastUpdateMs = millis();

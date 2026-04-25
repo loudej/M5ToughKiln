@@ -3,8 +3,7 @@
 
 #include <cstdint>
 #include <M5Unified.h>
-#include <M5UnitUnified.h>
-#include <M5UnitUnifiedMETER.h>
+#include "kmeter_iso_bare_wire.h"
 
 class IKilnHardware {
 public:
@@ -34,16 +33,14 @@ public:
 
 // Real hardware: M5Stack KMeter ISO thermocouple unit on Port A.
 //
-// Uses the M5UnitUnified-based M5Unit-METER library, which drives I2C through
-// M5HAL instead of Arduino's Wire. This avoids the long-standing ESP32 Arduino
-// Wire bug with repeated-start transactions against STM32-based slaves with
-// clock stretching (which is what made the older M5Unit-KMeterISO library fail).
+// Driven by KMeterIsoBareWire — a hand-rolled bare-Wire wrapper that ignores
+// the ESP32 Arduino I2C driver's spurious `endTransmission` NACK reports under
+// clock stretching (which made off-the-shelf libraries unusable).
 //
 // Relay output is a stub until a relay module is wired.
 class KMeterISOHardware : public IKilnHardware {
 private:
-    m5::unit::UnitUnified units;
-    m5::unit::UnitKmeterISO unit;
+    KMeterIsoBareWire kmeter;
     float lastTemp = 25.0f;
     bool relayState = false;
     bool initialized = false;
