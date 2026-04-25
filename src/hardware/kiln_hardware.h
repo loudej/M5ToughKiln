@@ -8,7 +8,7 @@
 class IKilnHardware {
 public:
     virtual ~IKilnHardware() = default;
-    virtual void init() = 0;
+    virtual bool init() = 0;
     virtual float readTemperature() = 0;
     virtual void setRelay(bool on) = 0;
     virtual bool isRelayOn() const = 0;
@@ -25,7 +25,7 @@ private:
     const float coolRatePerSec = 0.05f; // ~180°C/h
 
 public:
-    void init() override;
+    bool init() override;
     float readTemperature() override;
     void setRelay(bool on) override;
     bool isRelayOn() const override;
@@ -46,7 +46,7 @@ private:
     bool initialized = false;
 
 public:
-    void init() override;
+    bool init() override;
     float readTemperature() override;
     void setRelay(bool on) override;
     bool isRelayOn() const override;

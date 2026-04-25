@@ -20,8 +20,11 @@ void FiringController::update() {
 
     if (appState.status.currentState == KilnState::IDLE || appState.status.currentState == KilnState::ERROR) {
         hardware->setRelay(false);
-        segmentStartMs = 0; // reset
+        segmentStartMs = 0;
+        programStartMs = 0;
         currentSegmentIdx = 0;
+        appState.status.totalTimeElapsed   = 0;
+        appState.status.segmentTimeElapsed = 0;
         return;
     }
 
@@ -72,8 +75,8 @@ void FiringController::processSegment() {
 
     FiringSegment& seg = prog->segments[currentSegmentIdx];
     uint32_t now = millis();
-    appState.status.segmentTimeElapsed = (now - segmentStartMs) / 60000; // in minutes
-    appState.status.totalTimeElapsed = (now - programStartMs) / 60000;
+    appState.status.segmentTimeElapsed = (now - segmentStartMs) / 60000; // minutes, compared against soakTime
+    appState.status.totalTimeElapsed   = (now - programStartMs) / 1000;  // seconds, used by UI for elapsed/remaining/bar
 
     // Calculate setpoint
     float setpoint = segmentStartTemp;

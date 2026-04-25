@@ -4,7 +4,7 @@
 
 // ── KMeterISOHardware ────────────────────────────────────────────────────────
 
-void KMeterISOHardware::init() {
+bool KMeterISOHardware::init() {
     auto sda = M5.getPin(m5::pin_name_t::port_a_sda);
     auto scl = M5.getPin(m5::pin_name_t::port_a_scl);
     M5.Log.printf("KMeter ISO: Port A SDA=%u SCL=%u\n", sda, scl);
@@ -12,16 +12,18 @@ void KMeterISOHardware::init() {
     if (!kmeter.begin(sda, scl)) {
         M5.Log.println("KMeter ISO: NOT found — check Port A connection");
         initialized = false;
-        return;
+        return false;
     }
 
     uint8_t fw = 0;
-    if (kmeter.readFirmwareVersion(fw)) {
-        M5.Log.printf("KMeter ISO: ready (FW=0x%02X)\n", fw);
-    } else {
-        M5.Log.println("KMeter ISO: ready (FW read failed, but bus is up)");
+    if (!kmeter.readFirmwareVersion(fw)) {
+        M5.Log.println("KMeter ISO: found but FW read failed");
+        initialized = false;
+        return false;
     }
+    M5.Log.printf("KMeter ISO: ready (FW=0x%02X)\n", fw);
     initialized = true;
+    return true;
 }
 
 float KMeterISOHardware::readTemperature() {
@@ -48,8 +50,9 @@ bool KMeterISOHardware::isRelayOn() const {
 
 // ── MockKilnHardware ─────────────────────────────────────────────────────────
 
-void MockKilnHardware::init() {
+bool MockKilnHardware::init() {
     lastUpdateMs = millis();
+    return true;
 }
 
 float MockKilnHardware::readTemperature() {

@@ -16,8 +16,8 @@ struct KilnStatus {
     KilnState currentState = KilnState::IDLE;
     float currentTemperature = 25.0f;
     float targetTemperature = 25.0f;
-    uint32_t segmentTimeElapsed = 0;
-    uint32_t totalTimeElapsed = 0;
+    uint32_t segmentTimeElapsed = 0;  // minutes — compared against soakTime
+    uint32_t totalTimeElapsed   = 0;  // seconds — used by UI for elapsed/remaining/bar
     std::string activeProgramName = "None";
 };
 

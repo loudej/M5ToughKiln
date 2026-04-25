@@ -79,7 +79,10 @@ void setup()
     persistence.loadSettings();
     persistence.loadCustomPrograms(appState.customPrograms);
 
-    hardware.init();
+    while (!hardware.init()) {
+        M5.Log.println("KMeter ISO: retrying in 500 ms ...");
+        delay(500);
+    }
 
     // Initialize application UI
     ui_init();
