@@ -2,6 +2,7 @@
 #include "ui_main_screen.h"
 #include "ui.h"
 #include "ui_sizes.h"
+#include "robotomono_fonts.h"
 #include "../model/app_state.h"
 #include "../model/temp_units.h"
 #include "../model/profile_generator.h"
@@ -9,12 +10,19 @@
 // 70°F expressed in °C — assumed room temperature for duration estimates
 static constexpr float ROOM_TEMP_C = (70.0f - 32.0f) * 5.0f / 9.0f;
 
+// Progress bar height in the running time row
+static constexpr lv_coord_t BAR_H = 10;
+
 static lv_obj_t *main_screen;
 static lv_obj_t *lbl_temp;
 static lv_obj_t *lbl_status;
 static lv_obj_t *lbl_program;
 static lv_obj_t *lbl_target_temp;
-static lv_obj_t *lbl_elapsed_time;
+static lv_obj_t *lbl_elapsed_time;      // idle/error state: estimated duration
+static lv_obj_t *cont_time_running;     // running state: elapsed | bar | remaining
+static lv_obj_t *lbl_running_elapsed;
+static lv_obj_t *bar_progress;
+static lv_obj_t *lbl_running_remaining;
 static lv_obj_t *btn_start;
 static lv_obj_t *lbl_btn_start;
 static lv_obj_t *btn_config;
@@ -152,7 +160,7 @@ void ui_main_screen_create() {
     lv_obj_set_grid_cell(lbl_hdr_temp, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 1, 1);
 
     lbl_temp = lv_label_create(cont_fill);
-    lv_obj_set_style_text_font(lbl_temp, &lv_font_montserrat_48, 0); 
+    lv_obj_set_style_text_font(lbl_temp, &robotomono_48, 0);
     lv_label_set_text(lbl_temp, "25.0 C");
     lv_obj_set_grid_cell(lbl_temp, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 1, 1);
 
@@ -180,8 +188,36 @@ void ui_main_screen_create() {
     lv_obj_set_grid_cell(lbl_hdr_time, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 4, 1);
 
     lbl_elapsed_time = lv_label_create(cont_fill);
+    lv_obj_set_style_text_font(lbl_elapsed_time, &robotomono_14, 0);
     lv_label_set_text(lbl_elapsed_time, "--:--");
     lv_obj_set_grid_cell(lbl_elapsed_time, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 4, 1);
+
+    // Running state: elapsed | progress bar | remaining (hidden until program runs)
+    cont_time_running = lv_obj_create(cont_fill);
+    lv_obj_set_height(cont_time_running, LV_SIZE_CONTENT);
+    lv_obj_set_layout(cont_time_running, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(cont_time_running, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(cont_time_running, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(cont_time_running, 0, 0);
+    lv_obj_set_style_pad_column(cont_time_running, UI_PAD_STD, 0);
+    lv_obj_set_style_border_width(cont_time_running, 0, 0);
+    lv_obj_set_style_bg_opa(cont_time_running, 0, 0);
+    lv_obj_set_grid_cell(cont_time_running, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_CENTER, 4, 1);
+    lv_obj_add_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_running_elapsed = lv_label_create(cont_time_running);
+    lv_obj_set_style_text_font(lbl_running_elapsed, &robotomono_14, 0);
+    lv_label_set_text(lbl_running_elapsed, "0:00");
+
+    bar_progress = lv_bar_create(cont_time_running);
+    lv_obj_set_flex_grow(bar_progress, 1);
+    lv_obj_set_height(bar_progress, BAR_H);
+    lv_bar_set_range(bar_progress, 0, 100);
+    lv_bar_set_value(bar_progress, 0, LV_ANIM_OFF);
+
+    lbl_running_remaining = lv_label_create(cont_time_running);
+    lv_obj_set_style_text_font(lbl_running_remaining, &robotomono_14, 0);
+    lv_label_set_text(lbl_running_remaining, "0:00");
 
     // Start/Stop Button (fills available width)
     btn_start = lv_btn_create(cont_bottom);
@@ -220,17 +256,21 @@ void ui_main_screen_update() {
     if (appState.status.currentState == KilnState::IDLE) {
         lv_label_set_text(lbl_status, "IDLE");
         update_idle_program_labels();
+        lv_obj_clear_flag(lbl_elapsed_time, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(lbl_btn_start, "START");
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_GREEN), 0);
         lv_obj_clear_state(btn_config, LV_STATE_DISABLED);
     } else if (appState.status.currentState == KilnState::ERROR) {
         lv_label_set_text(lbl_status, "ERROR!");
         update_idle_program_labels();
+        lv_obj_clear_flag(lbl_elapsed_time, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(lbl_btn_start, "RESET");
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_RED), 0);
         lv_obj_clear_state(btn_config, LV_STATE_DISABLED);
     } else {
-        // Running states (Ramping or Soaking)
+        // Running states (Ramping, Soaking, Cooling)
         if (appState.status.currentState == KilnState::RAMPING) {
             lv_label_set_text(lbl_status, "RAMPING");
         } else if (appState.status.currentState == KilnState::SOAKING) {
@@ -241,7 +281,25 @@ void ui_main_screen_update() {
 
         float dispTarget = toDisplayTemp(appState.status.targetTemperature, appState.tempUnit);
         lv_label_set_text_fmt(lbl_target_temp, "%.1f\xc2\xb0%s", dispTarget, unitSymbol(appState.tempUnit));
-        lv_label_set_text_fmt(lbl_elapsed_time, "%02lu:%02lu", appState.status.totalTimeElapsed / 60, appState.status.totalTimeElapsed % 60);
+
+        // Switch to running time row: elapsed | bar | remaining
+        lv_obj_add_flag(lbl_elapsed_time, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
+
+        uint32_t elapsedSec = appState.status.totalTimeElapsed;
+        lv_label_set_text_fmt(lbl_running_elapsed, "%lu:%02lu",
+                              elapsedSec / 3600, (elapsedSec % 3600) / 60);
+
+        const FiringProgram* prog = get_active_program();
+        float totalSec = prog ? ProfileGenerator::estimateTotalMinutes(*prog, ROOM_TEMP_C) * 60.0f : 0.0f;
+
+        float remSec = (totalSec > (float)elapsedSec) ? totalSec - (float)elapsedSec : 0.0f;
+        lv_label_set_text_fmt(lbl_running_remaining, "%lu:%02lu",
+                              (uint32_t)remSec / 3600, ((uint32_t)remSec % 3600) / 60);
+
+        int pct = (totalSec > 0.0f) ? (int)((float)elapsedSec / totalSec * 100.0f) : 0;
+        if (pct > 100) pct = 100;
+        lv_bar_set_value(bar_progress, pct, LV_ANIM_OFF);
 
         lv_label_set_text(lbl_btn_start, "STOP");
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_RED), 0);
