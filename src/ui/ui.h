@@ -6,5 +6,6 @@
 void ui_init();
 void ui_switch_to_main_screen();
 void ui_switch_to_program_config_screen();
+void ui_switch_to_settings_screen();
 
 #endif // UI_H

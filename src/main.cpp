@@ -83,14 +83,15 @@ void setup()
     // Adjust theme
     lv_display_set_theme(disp,
        lv_theme_default_init(disp,
-        lv_palette_main(LV_PALETTE_BROWN),
+        lv_palette_main(LV_PALETTE_BLUE_GREY),
         lv_palette_main(LV_PALETTE_RED),
         true,
         LV_FONT_DEFAULT)
       );
 
-    // Initialize application state and load custom programs
+    // Initialize application state and load persisted data
     app_state_init();
+    persistence.loadSettings();
     persistence.loadCustomPrograms(appState.customPrograms);
 
     // Initialize Mock Hardware

@@ -1,5 +1,6 @@
 #include "preferences_persistence.h"
 #include "../model/profile_generator.h"
+#include "../model/temp_units.h"
 #include <Arduino.h>
 
 bool PreferencesPersistence::loadCustomPrograms(std::vector<FiringProgram>& programs) {
@@ -112,6 +113,21 @@ bool PreferencesPersistence::saveCustomPrograms(const std::vector<FiringProgram>
         prefs.putInt(key, appState.predefinedPrograms[i].origSoak);
     }
 
+    prefs.end();
+    return true;
+}
+
+bool PreferencesPersistence::loadSettings() {
+    prefs.begin(NVS_SETTINGS_NAMESPACE, true);
+    int unit = prefs.getInt("temp_unit", 0); // 0 = Fahrenheit (default), 1 = Celsius
+    appState.tempUnit = (unit == 1) ? TempUnit::CELSIUS : TempUnit::FAHRENHEIT;
+    prefs.end();
+    return true;
+}
+
+bool PreferencesPersistence::saveSettings() {
+    prefs.begin(NVS_SETTINGS_NAMESPACE, false);
+    prefs.putInt("temp_unit", appState.tempUnit == TempUnit::CELSIUS ? 1 : 0);
     prefs.end();
     return true;
 }

@@ -3,9 +3,14 @@
 #include "ui.h"
 #include "ui_keypad.h"
 #include "ui_edit_segment_popup.h"
+#include "ui_sizes.h"
 #include "../model/app_state.h"
+#include "../model/temp_units.h"
 #include "../model/profile_generator.h"
 #include "../service/preferences_persistence.h"
+
+static constexpr lv_coord_t PAD_TOP_BAR    = 5;
+static constexpr lv_coord_t TOP_BAR_ITEM_H = 40;
 
 extern PreferencesPersistence persistence;
 
@@ -96,43 +101,46 @@ static void dropdown_event_cb(lv_event_t * e) {
     }
 }
 
+static void save_current_program() {
+    uint16_t selected_idx = lv_dropdown_get_selected(dropdown_program);
+    
+    // If predefined program selected, update active program from inputs
+    if (selected_idx <= 3) {
+        const char* coneStr = lv_textarea_get_text(ta_cone);
+        float candle = atof(lv_textarea_get_text(ta_candle));
+        float soak = atof(lv_textarea_get_text(ta_soak));
+        
+        // Re-generate the program based on current text inputs
+        if (selected_idx == 0) appState.predefinedPrograms[0] = ProfileGenerator::generateFastBisque(coneStr, candle, soak);
+        else if (selected_idx == 1) appState.predefinedPrograms[1] = ProfileGenerator::generateSlowBisque(coneStr, candle, soak);
+        else if (selected_idx == 2) appState.predefinedPrograms[2] = ProfileGenerator::generateFastGlaze(coneStr, candle, soak);
+        else if (selected_idx == 3) appState.predefinedPrograms[3] = ProfileGenerator::generateSlowGlaze(coneStr, candle, soak);
+    }
+    
+    appState.activeProgramIndex = selected_idx;
+    if (selected_idx <= 3) {
+        appState.status.activeProgramName = appState.predefinedPrograms[selected_idx].name;
+    } else {
+        // Handle Custom program selection...
+        if (current_custom_idx >= 0 && current_custom_idx < appState.customPrograms.size()) {
+             appState.status.activeProgramName = appState.customPrograms[current_custom_idx].name;
+        }
+    }
+    
+    persistence.saveCustomPrograms(appState.customPrograms);
+}
+
 static void btn_back_event_cb(lv_event_t * e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        // Discard any volatile changes by reloading from NVM
-        persistence.loadCustomPrograms(appState.customPrograms);
+        save_current_program();
         ui_switch_to_main_screen();
     }
 }
 
-static void btn_save_event_cb(lv_event_t * e) {
+static void btn_start_event_cb(lv_event_t * e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
-        uint16_t selected_idx = lv_dropdown_get_selected(dropdown_program);
-        
-        // If predefined program selected, update active program from inputs
-        if (selected_idx <= 3) {
-            const char* coneStr = lv_textarea_get_text(ta_cone);
-            float candle = atof(lv_textarea_get_text(ta_candle));
-            float soak = atof(lv_textarea_get_text(ta_soak));
-            
-            // Re-generate the program based on current text inputs
-            if (selected_idx == 0) appState.predefinedPrograms[0] = ProfileGenerator::generateFastBisque(coneStr, candle, soak);
-            else if (selected_idx == 1) appState.predefinedPrograms[1] = ProfileGenerator::generateSlowBisque(coneStr, candle, soak);
-            else if (selected_idx == 2) appState.predefinedPrograms[2] = ProfileGenerator::generateFastGlaze(coneStr, candle, soak);
-            else if (selected_idx == 3) appState.predefinedPrograms[3] = ProfileGenerator::generateSlowGlaze(coneStr, candle, soak);
-        }
-        
-        appState.activeProgramIndex = selected_idx;
-        if (selected_idx <= 3) {
-            appState.status.activeProgramName = appState.predefinedPrograms[selected_idx].name;
-        } else {
-            // Handle Custom program selection...
-            if (current_custom_idx >= 0 && current_custom_idx < appState.customPrograms.size()) {
-                 appState.status.activeProgramName = appState.customPrograms[current_custom_idx].name;
-            }
-        }
-        
-        persistence.saveCustomPrograms(appState.customPrograms);
-
+        save_current_program();
+        appState.status.currentState = KilnState::RAMPING;
         ui_switch_to_main_screen();
     }
 }
@@ -140,44 +148,52 @@ static void btn_save_event_cb(lv_event_t * e) {
 static void build_predefined_container() {
     cont_predefined = lv_obj_create(cont_fill);
     lv_obj_set_size(cont_predefined, lv_pct(100), lv_pct(100));
-    lv_obj_set_style_border_width(cont_predefined, 0, 0); // No border for cleaner look
+    lv_obj_set_style_border_width(cont_predefined, 0, 0);
     lv_obj_set_style_bg_opa(cont_predefined, 0, 0);
-    lv_obj_set_style_pad_all(cont_predefined, 0, 0);
+    lv_obj_set_style_pad_all(cont_predefined, UI_PAD_STD, 0);
+
+    static const lv_coord_t col_dsc[] = {UI_GRID_INPUT_W, LV_GRID_FR(1), LV_GRID_TEMPLATE_LAST};
+    static const lv_coord_t row_dsc[] = {LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_CONTENT, LV_GRID_TEMPLATE_LAST};
+    
+    lv_obj_set_layout(cont_predefined, LV_LAYOUT_GRID);
+    lv_obj_set_grid_dsc_array(cont_predefined, col_dsc, row_dsc);
+    lv_obj_set_style_pad_row(cont_predefined, UI_PAD_STD, 0);
+    lv_obj_set_style_pad_column(cont_predefined, UI_PAD_STD, 0);
 
     // Cone Temp
     ta_cone = lv_textarea_create(cont_predefined);
-    lv_obj_set_size(ta_cone, 60, 35);
     lv_textarea_set_one_line(ta_cone, true);
-    lv_obj_align(ta_cone, LV_ALIGN_TOP_LEFT, 15, 5);
+    lv_obj_set_height(ta_cone, LV_SIZE_CONTENT);
     lv_obj_add_event_cb(ta_cone, ui_ta_event_cb, LV_EVENT_ALL, NULL);
+    lv_obj_set_grid_cell(ta_cone, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_START, 0, 1);
     
     lv_obj_t *lbl_cone = lv_label_create(cont_predefined);
     lv_label_set_text(lbl_cone, "Cone");
-    lv_obj_align_to(lbl_cone, ta_cone, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_set_grid_cell(lbl_cone, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 0, 1);
 
     // Candle Time
     ta_candle = lv_textarea_create(cont_predefined);
-    lv_obj_set_size(ta_candle, 60, 35);
     lv_textarea_set_one_line(ta_candle, true);
+    lv_obj_set_height(ta_candle, LV_SIZE_CONTENT);
     lv_textarea_set_placeholder_text(ta_candle, "min");
-    lv_obj_align_to(ta_candle, ta_cone, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 10);
     lv_obj_add_event_cb(ta_candle, ui_ta_event_cb, LV_EVENT_ALL, NULL);
+    lv_obj_set_grid_cell(ta_candle, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_START, 1, 1);
     
     lv_obj_t *lbl_candle = lv_label_create(cont_predefined);
     lv_label_set_text(lbl_candle, "Candle");
-    lv_obj_align_to(lbl_candle, ta_candle, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_set_grid_cell(lbl_candle, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 1, 1);
 
     // Soak Time
     ta_soak = lv_textarea_create(cont_predefined);
-    lv_obj_set_size(ta_soak, 60, 35);
     lv_textarea_set_one_line(ta_soak, true);
+    lv_obj_set_height(ta_soak, LV_SIZE_CONTENT);
     lv_textarea_set_placeholder_text(ta_soak, "min");
-    lv_obj_align_to(ta_soak, ta_candle, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 10);
     lv_obj_add_event_cb(ta_soak, ui_ta_event_cb, LV_EVENT_ALL, NULL);
+    lv_obj_set_grid_cell(ta_soak, LV_GRID_ALIGN_STRETCH, 0, 1, LV_GRID_ALIGN_START, 2, 1);
     
     lv_obj_t *lbl_soak = lv_label_create(cont_predefined);
     lv_label_set_text(lbl_soak, "Soak");
-    lv_obj_align_to(lbl_soak, ta_soak, LV_ALIGN_OUT_RIGHT_MID, 10, 0);
+    lv_obj_set_grid_cell(lbl_soak, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 2, 1);
 }
 
 static void btn_add_segment_cb(lv_event_t * e) {
@@ -231,14 +247,23 @@ static void update_custom_segment_list() {
         
         lv_obj_t * lbl_summary = lv_label_create(btn_edit);
         char buf[64];
-        snprintf(buf, sizeof(buf), "%.0fC/h to %.0fC hold %dm", seg.rampRate, seg.targetTemperature, seg.soakTime);
+        const char* unit = unitSymbol(appState.tempUnit);
+        float dispTarget = toDisplayTemp(seg.targetTemperature, appState.tempUnit);
+        float dispRate   = toDisplayRate(seg.rampRate, appState.tempUnit);
+        if (seg.soakTime > 0) {
+            snprintf(buf, sizeof(buf), "%.0f\xc2\xb0%s  %.0f\xc2\xb0%s/h  %dm",
+                     dispTarget, unit, dispRate, unit, seg.soakTime);
+        } else {
+            snprintf(buf, sizeof(buf), "%.0f\xc2\xb0%s  %.0f\xc2\xb0%s/h",
+                     dispTarget, unit, dispRate, unit);
+        }
         lv_label_set_text(lbl_summary, buf);
         lv_obj_center(lbl_summary);
     }
 
     // Add Segment Button at the bottom
     lv_obj_t * btn_add = lv_btn_create(list_segments);
-    lv_obj_set_size(btn_add, lv_pct(100), 40);
+    lv_obj_set_size(btn_add, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_add_event_cb(btn_add, btn_add_segment_cb, LV_EVENT_CLICKED, NULL);
     lv_obj_t * lbl_add = lv_label_create(btn_add);
     lv_label_set_text(lbl_add, "Add Segment");
@@ -253,13 +278,15 @@ static void build_custom_container() {
     lv_obj_set_flex_flow(cont_custom, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_style_bg_opa(cont_custom, 0, 0);
     lv_obj_set_style_border_width(cont_custom, 0, 0);
+    lv_obj_set_style_pad_all(cont_custom, 0, 0);
 
     // List container first
     list_segments = lv_obj_create(cont_custom);
     lv_obj_set_size(list_segments, lv_pct(100), lv_pct(100));
     lv_obj_set_layout(list_segments, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(list_segments, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_all(list_segments, 0, 0);
+    lv_obj_set_style_pad_all(list_segments, UI_PAD_STD, 0);
+    lv_obj_set_style_pad_row(list_segments, UI_PAD_STD, 0);
     lv_obj_set_style_bg_opa(list_segments, 0, 0);
     lv_obj_set_style_border_width(list_segments, 0, 0);
 }
@@ -282,11 +309,11 @@ void ui_program_config_screen_create() {
     lv_obj_set_style_bg_opa(screen_layout, 0, 0);
 
     cont_top = lv_obj_create(screen_layout);
-    lv_obj_set_size(cont_top, lv_pct(100), 50);
+    lv_obj_set_size(cont_top, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_set_layout(cont_top, LV_LAYOUT_FLEX);
     lv_obj_set_flex_flow(cont_top, LV_FLEX_FLOW_ROW);
-    lv_obj_set_style_pad_all(cont_top, 5, 0);
-    lv_obj_set_style_pad_column(cont_top, 10, 0);
+    lv_obj_set_style_pad_all(cont_top, PAD_TOP_BAR, 0);
+    lv_obj_set_style_pad_column(cont_top, UI_PAD_STD, 0);
     lv_obj_set_style_border_width(cont_top, 0, 0);
     lv_obj_set_style_bg_opa(cont_top, 0, 0);
 
@@ -297,28 +324,27 @@ void ui_program_config_screen_create() {
     lv_obj_set_style_pad_all(cont_fill, 0, 0);
     lv_obj_set_style_bg_opa(cont_fill, 0, 0);
     
-    // Back Button (X) on left
-    btn_back = lv_button_create(cont_top);
-    lv_obj_set_size(btn_back, 40, 40);
-    // lv_obj_set_style_bg_color(btn_back, lv_palette_main(LV_PALETTE_RED), 0);
+    // Back Button (<-) on left
+    btn_back = lv_btn_create(cont_top);
+    lv_obj_set_size(btn_back, LV_SIZE_CONTENT, TOP_BAR_ITEM_H);
     lv_obj_add_event_cb(btn_back, btn_back_event_cb, LV_EVENT_ALL, NULL);
     lv_obj_t *lbl_back = lv_label_create(btn_back);
-    lv_label_set_text(lbl_back, LV_SYMBOL_CLOSE);
+    lv_label_set_text(lbl_back, LV_SYMBOL_LEFT);
     lv_obj_center(lbl_back);
 
     // Top dropdown in middle (fills space)
     dropdown_program = lv_dropdown_create(cont_top);
-    lv_obj_set_height(dropdown_program, 40);
+    lv_obj_set_height(dropdown_program, TOP_BAR_ITEM_H);
     lv_obj_set_flex_grow(dropdown_program, 1);
     lv_obj_add_event_cb(dropdown_program, dropdown_event_cb, LV_EVENT_VALUE_CHANGED, NULL);
 
-    // Save Button (Checkmark) on right
-    btn_save = lv_button_create(cont_top);
-    lv_obj_set_size(btn_save, 40, 40);
+    // Start Button on right
+    btn_save = lv_btn_create(cont_top);
+    lv_obj_set_size(btn_save, LV_SIZE_CONTENT, TOP_BAR_ITEM_H);
     lv_obj_set_style_bg_color(btn_save, lv_palette_main(LV_PALETTE_GREEN), 0);
-    lv_obj_add_event_cb(btn_save, btn_save_event_cb, LV_EVENT_ALL, NULL);
+    lv_obj_add_event_cb(btn_save, btn_start_event_cb, LV_EVENT_ALL, NULL);
     lv_obj_t *lbl_save = lv_label_create(btn_save);
-    lv_label_set_text(lbl_save, LV_SYMBOL_OK);
+    lv_label_set_text(lbl_save, "START");
     lv_obj_center(lbl_save);
 
     // Build the dynamic containers

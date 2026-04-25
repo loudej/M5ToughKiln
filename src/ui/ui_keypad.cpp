@@ -1,13 +1,16 @@
 #include "../lvgl_includes.h"
 #include "ui_keypad.h"
 
+static constexpr lv_coord_t KEYPAD_W = 140;
+static constexpr lv_coord_t KEYPAD_HT = 200;
+
 static lv_obj_t * global_kb = NULL;
 
 static const char * kb_map[] = {
     "1", "2", "3", "\n",
     "4", "5", "6", "\n",
     "7", "8", "9", "\n",
-    LV_SYMBOL_OK, "0", LV_SYMBOL_BACKSPACE, NULL
+    ".", "0", LV_SYMBOL_BACKSPACE, NULL
 };
 
 static const lv_btnmatrix_ctrl_t kb_ctrl[] = {
@@ -53,8 +56,8 @@ void ui_keypad_init() {
     lv_keyboard_set_mode(global_kb, LV_KEYBOARD_MODE_USER_1);
     
     // Size and position: Right side, mostly full height
-    lv_obj_set_size(global_kb, 140, 240); 
-    lv_obj_align(global_kb, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_size(global_kb, KEYPAD_W, KEYPAD_HT);
+    lv_obj_align(global_kb, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
     
     lv_obj_add_event_cb(global_kb, kb_event_cb, LV_EVENT_ALL, NULL);
     

@@ -3,6 +3,7 @@
 
 #include "kiln_status.h"
 #include "firing_program.h"
+#include "temp_units.h"
 #include <vector>
 
 struct AppState {
@@ -10,6 +11,7 @@ struct AppState {
     std::vector<FiringProgram> predefinedPrograms;
     std::vector<FiringProgram> customPrograms;
     int activeProgramIndex = -1;
+    TempUnit tempUnit = TempUnit::FAHRENHEIT;
 };
 
 // Global application state instance
