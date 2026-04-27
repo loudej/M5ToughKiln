@@ -4,6 +4,30 @@
 // Define the global application state instance
 AppState appState;
 
+FiringProgram* AppState::activeProgram() {
+    if (activeProgramIndex < 0) return nullptr;
+    if (activeProgramIndex < (int)predefinedPrograms.size()) {
+        return &predefinedPrograms[activeProgramIndex];
+    }
+    const int customIdx = activeProgramIndex - (int)predefinedPrograms.size();
+    if (customIdx >= 0 && customIdx < (int)customPrograms.size()) {
+        return &customPrograms[customIdx];
+    }
+    return nullptr;
+}
+
+const FiringProgram* AppState::activeProgram() const {
+    if (activeProgramIndex < 0) return nullptr;
+    if (activeProgramIndex < (int)predefinedPrograms.size()) {
+        return &predefinedPrograms[activeProgramIndex];
+    }
+    const int customIdx = activeProgramIndex - (int)predefinedPrograms.size();
+    if (customIdx >= 0 && customIdx < (int)customPrograms.size()) {
+        return &customPrograms[customIdx];
+    }
+    return nullptr;
+}
+
 void app_state_init() {
     // Generate empty templates for the predefined programs
     appState.predefinedPrograms.push_back(ProfileGenerator::generateFastBisque("04", 0, 0));

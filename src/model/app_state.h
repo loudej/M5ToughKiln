@@ -12,6 +12,10 @@ struct AppState {
     std::vector<FiringProgram> customPrograms;
     int activeProgramIndex = -1;
     TempUnit tempUnit = TempUnit::FAHRENHEIT;
+
+    // nullptr if no valid program selected (index out of range or < 0).
+    FiringProgram* activeProgram();
+    const FiringProgram* activeProgram() const;
 };
 
 // Global application state instance
