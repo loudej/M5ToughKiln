@@ -5,9 +5,15 @@
 // ── KMeterISOHardware ────────────────────────────────────────────────────────
 
 bool KMeterISOHardware::init() {
-    auto sda = M5.getPin(m5::pin_name_t::port_a_sda);
-    auto scl = M5.getPin(m5::pin_name_t::port_a_scl);
-    M5.Log.printf("KMeter ISO: Port A SDA=%u SCL=%u\n", sda, scl);
+    auto sda      = M5.getPin(m5::pin_name_t::port_a_sda);
+    auto scl      = M5.getPin(m5::pin_name_t::port_a_scl);
+    // M5Unified's _pin_table_port_bc has no entry for board_M5Tough (only
+    // board_M5StackCore2), so getPin(port_b_out) returns 0xFFFFFFFF.
+    // M5Tough shares Core2 hardware: Port B pin 2 is GPIO 26.
+    static constexpr int8_t PORT_B_OUT_GPIO = 26;
+    auto relayOut = PORT_B_OUT_GPIO;
+    M5.Log.printf("KMeter ISO init: Port A SDA=%u  SCL=%u  |  Port B relay=%d\n",
+                  sda, scl, relayOut);
 
     if (!kmeter.begin(sda, scl)) {
         M5.Log.println("KMeter ISO: NOT found — check Port A connection");
@@ -22,6 +28,11 @@ bool KMeterISOHardware::init() {
         return false;
     }
     M5.Log.printf("KMeter ISO: ready (FW=0x%02X)\n", fw);
+
+    relayPin = relayOut;
+    pinMode(relayPin, OUTPUT);
+    digitalWrite(relayPin, LOW);
+
     initialized = true;
     return true;
 }
@@ -40,8 +51,11 @@ float KMeterISOHardware::readTemperature() {
 }
 
 void KMeterISOHardware::setRelay(bool on) {
+    if (on == relayState) return;
     relayState = on;
-    // TODO: drive a relay output when hardware is wired
+    if (relayPin >= 0) {
+        digitalWrite(relayPin, on ? HIGH : LOW);
+    }
 }
 
 bool KMeterISOHardware::isRelayOn() const {

@@ -3,6 +3,7 @@
 #include "ui/ui_main_screen.h"
 #include "model/app_state.h"
 #include "hardware/kiln_hardware.h"
+#include "control/power_output.h"
 #include "control/firing_controller.h"
 #include "service/preferences_persistence.h"
 
@@ -13,7 +14,8 @@ static lv_color_t* buf;
 
 // Core Engine Components
 static KMeterISOHardware hardware;
-static FiringController controller(&hardware);
+static PowerOutput       powerOutput(&hardware);
+static FiringController  controller(&hardware, &powerOutput);
 PreferencesPersistence persistence;
 
 // LVGL display flush callback

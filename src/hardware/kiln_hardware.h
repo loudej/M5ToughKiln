@@ -44,6 +44,7 @@ private:
     float lastTemp = 25.0f;
     bool relayState = false;
     bool initialized = false;
+    int8_t relayPin = -1;
 
 public:
     bool init() override;

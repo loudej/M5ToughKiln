@@ -18,6 +18,7 @@ struct KilnStatus {
     float targetTemperature = 25.0f;
     uint32_t segmentTimeElapsed = 0;  // minutes — compared against soakTime
     uint32_t totalTimeElapsed   = 0;  // seconds — used by UI for elapsed/remaining/bar
+    float    power              = 0.0f;  // 0.0–1.0, current PID output effort
     std::string activeProgramName = "None";
 };
 

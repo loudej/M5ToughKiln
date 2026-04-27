@@ -16,6 +16,7 @@ static constexpr lv_coord_t BAR_H = 10;
 static lv_obj_t *main_screen;
 static lv_obj_t *lbl_temp;
 static lv_obj_t *lbl_status;
+static lv_obj_t *lbl_power;
 static lv_obj_t *lbl_program;
 static lv_obj_t *lbl_target_temp;
 static lv_obj_t *lbl_elapsed_time;      // idle/error state: estimated duration
@@ -127,11 +128,12 @@ void ui_main_screen_create() {
         LV_GRID_TEMPLATE_LAST
     };
     static const lv_coord_t row_dsc[] = {
-        LV_GRID_CONTENT, // Program
-        LV_GRID_CONTENT, // Temp
-        LV_GRID_CONTENT, // Status
-        LV_GRID_CONTENT, // Target
-        LV_GRID_CONTENT, // Time
+        LV_GRID_CONTENT, // Row 0: Program
+        LV_GRID_CONTENT, // Row 1: Temp
+        LV_GRID_CONTENT, // Row 2: Status
+        LV_GRID_CONTENT, // Row 3: Power
+        LV_GRID_CONTENT, // Row 4: Target
+        LV_GRID_CONTENT, // Row 5: Time
         LV_GRID_TEMPLATE_LAST
     };
 
@@ -173,24 +175,33 @@ void ui_main_screen_create() {
     lv_label_set_text(lbl_status, "IDLE");
     lv_obj_set_grid_cell(lbl_status, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 2, 1);
 
-    // Row 3: Target
+    // Row 3: Power
+    lv_obj_t *lbl_hdr_power = lv_label_create(cont_fill);
+    lv_label_set_text(lbl_hdr_power, "Power");
+    lv_obj_set_grid_cell(lbl_hdr_power, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 3, 1);
+
+    lbl_power = lv_label_create(cont_fill);
+    lv_label_set_text(lbl_power, "0%");
+    lv_obj_set_grid_cell(lbl_power, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 3, 1);
+
+    // Row 4: Target
     lv_obj_t *lbl_hdr_target = lv_label_create(cont_fill);
     lv_label_set_text(lbl_hdr_target, "Target");
-    lv_obj_set_grid_cell(lbl_hdr_target, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 3, 1);
+    lv_obj_set_grid_cell(lbl_hdr_target, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 4, 1);
 
     lbl_target_temp = lv_label_create(cont_fill);
     lv_label_set_text(lbl_target_temp, "-- C");
-    lv_obj_set_grid_cell(lbl_target_temp, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 3, 1);
+    lv_obj_set_grid_cell(lbl_target_temp, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 4, 1);
 
-    // Row 4: Time
+    // Row 5: Time
     lv_obj_t *lbl_hdr_time = lv_label_create(cont_fill);
     lv_label_set_text(lbl_hdr_time, "Time");
-    lv_obj_set_grid_cell(lbl_hdr_time, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 4, 1);
+    lv_obj_set_grid_cell(lbl_hdr_time, LV_GRID_ALIGN_START, 0, 1, LV_GRID_ALIGN_CENTER, 5, 1);
 
     lbl_elapsed_time = lv_label_create(cont_fill);
     lv_obj_set_style_text_font(lbl_elapsed_time, &robotomono_14, 0);
     lv_label_set_text(lbl_elapsed_time, "--:--");
-    lv_obj_set_grid_cell(lbl_elapsed_time, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 4, 1);
+    lv_obj_set_grid_cell(lbl_elapsed_time, LV_GRID_ALIGN_START, 1, 1, LV_GRID_ALIGN_CENTER, 5, 1);
 
     // Running state: elapsed | progress bar | remaining (hidden until program runs)
     cont_time_running = lv_obj_create(cont_fill);
@@ -202,7 +213,7 @@ void ui_main_screen_create() {
     lv_obj_set_style_pad_column(cont_time_running, UI_PAD_STD, 0);
     lv_obj_set_style_border_width(cont_time_running, 0, 0);
     lv_obj_set_style_bg_opa(cont_time_running, 0, 0);
-    lv_obj_set_grid_cell(cont_time_running, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_CENTER, 4, 1);
+    lv_obj_set_grid_cell(cont_time_running, LV_GRID_ALIGN_STRETCH, 1, 1, LV_GRID_ALIGN_CENTER, 5, 1);
     lv_obj_add_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
 
     lbl_running_elapsed = lv_label_create(cont_time_running);
@@ -252,6 +263,8 @@ void ui_main_screen_update() {
     lv_label_set_text_fmt(lbl_temp, "%.1f\xc2\xb0%s", dispTemp, unitSymbol(appState.tempUnit));
     lv_label_set_text_fmt(lbl_program, "%s", appState.status.activeProgramName.c_str());
 
+    lv_label_set_text_fmt(lbl_power, "%.0f%%", appState.status.power * 100.0f);
+
     // Update state dependent UI
     if (appState.status.currentState == KilnState::IDLE) {
         lv_label_set_text(lbl_status, "IDLE");
@@ -287,15 +300,16 @@ void ui_main_screen_update() {
         lv_obj_clear_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
 
         uint32_t elapsedSec = appState.status.totalTimeElapsed;
-        lv_label_set_text_fmt(lbl_running_elapsed, "%lu:%02lu",
+        lv_label_set_text_fmt(lbl_running_elapsed, "%u:%02u",
                               elapsedSec / 3600, (elapsedSec % 3600) / 60);
 
         const FiringProgram* prog = get_active_program();
         float totalSec = prog ? ProfileGenerator::estimateTotalMinutes(*prog, ROOM_TEMP_C) * 60.0f : 0.0f;
 
         float remSec = (totalSec > (float)elapsedSec) ? totalSec - (float)elapsedSec : 0.0f;
-        lv_label_set_text_fmt(lbl_running_remaining, "%lu:%02lu",
-                              (uint32_t)remSec / 3600, ((uint32_t)remSec % 3600) / 60);
+        uint32_t remSecU = (uint32_t)remSec;
+        lv_label_set_text_fmt(lbl_running_remaining, "%u:%02u",
+                              remSecU / 3600, (remSecU % 3600) / 60);
 
         int pct = (totalSec > 0.0f) ? (int)((float)elapsedSec / totalSec * 100.0f) : 0;
         if (pct > 100) pct = 100;
