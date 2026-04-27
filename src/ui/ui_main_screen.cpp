@@ -255,7 +255,7 @@ void ui_main_screen_create() {
     lv_obj_set_style_width(lbl_target_left, LV_SIZE_CONTENT, 0);
     lv_label_set_long_mode(lbl_target_left, LV_LABEL_LONG_MODE_CLIP);
     lv_obj_set_style_text_align(lbl_target_left, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_label_set_text(lbl_target_left, "—");
+    lv_label_set_text(lbl_target_left, "-");
     lv_obj_set_grid_cell(lbl_target_left, LV_GRID_ALIGN_END, 1, 1, LV_GRID_ALIGN_CENTER, 4, 1);
 
     bar_thermal = lv_bar_create(cont_fill);

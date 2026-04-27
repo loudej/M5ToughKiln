@@ -22,7 +22,7 @@ void kiln_wifi_request_join(const std::string& ssid, const std::string& pass);
 /// Drive connection state machine (call from main loop).
 void kiln_wifi_service();
 
-/// IP row: "disconnecting" / "connecting..." / IPv4 / em dash when idle
+/// IP row: "disconnecting" / "connecting..." / IPv4 / "-" when idle and not connected
 std::string kiln_wifi_ip_status_line();
 
 bool kiln_wifi_station_connect_blocking(const std::string& ssid, const std::string& pass,

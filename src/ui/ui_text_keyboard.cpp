@@ -37,6 +37,12 @@ void ui_text_keyboard_set_target(lv_obj_t *ta) {
     lv_obj_move_foreground(text_kb);
 }
 
+void ui_text_keyboard_clear_target() {
+    if (!text_kb)
+        return;
+    lv_keyboard_set_textarea(text_kb, nullptr);
+}
+
 void ui_text_keyboard_hide() {
     if (!text_kb)
         return;

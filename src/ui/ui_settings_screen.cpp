@@ -73,7 +73,7 @@ static void refresh_wifi_labels() {
     if (kiln_wifi_station_connected())
         lv_label_set_text_fmt(lbl_wifi_rssi, "%d dBm", kiln_wifi_station_rssi_dbm());
     else
-        lv_label_set_text(lbl_wifi_rssi, "\xe2\x80\x94");
+        lv_label_set_text(lbl_wifi_rssi, "-");
 }
 
 static void wifi_rebuild_dropdown_options(bool allow_while_open) {
@@ -164,6 +164,8 @@ static void modal_bg_event(lv_event_t *e) {
 }
 
 static void close_pass_modal(bool apply) {
+    /* Keyboard keeps a raw pointer to the textarea; clear it before we delete the modal subtree. */
+    ui_text_keyboard_clear_target();
     ui_text_keyboard_hide();
 
     if (!pass_modal)
@@ -404,7 +406,7 @@ void ui_settings_screen_create() {
         *value_out = lv_label_create(row);
         lv_obj_set_flex_grow(*value_out, 1);
         lv_obj_set_style_text_align(*value_out, LV_TEXT_ALIGN_RIGHT, 0);
-        lv_label_set_text(*value_out, "\xe2\x80\x94");
+        lv_label_set_text(*value_out, "-");
     };
 
     add_wifi_row(cont_fill, "IP address", &lbl_wifi_ip);

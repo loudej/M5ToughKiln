@@ -115,7 +115,7 @@ std::string kiln_wifi_ip_status_line() {
         return "connecting...";
     if (WiFi.status() == WL_CONNECTED)
         return WiFi.localIP().toString().c_str();
-    return "\xe2\x80\x94";
+    return "-";
 }
 
 bool kiln_wifi_station_connect_blocking(const std::string& ssid, const std::string& pass,
