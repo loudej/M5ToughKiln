@@ -1,6 +1,7 @@
 #include "firing_controller.h"
 #include "../hardware/kiln_sensor_read.h"
 #include "../model/app_state.h"
+#include "../model/firing_program.h"
 #include <Arduino.h>
 #include <string>
 
@@ -33,6 +34,27 @@ constexpr float kMinPidDt_sec     = 0.001f;
 constexpr float kDerivativeLpfAlpha = 0.25f;
 
 constexpr uint16_t kMaxConsecutiveSensorFailures = 25;  // ~2.5 s at 100 ms cadence
+
+/// Ramp phase is “done” by temperature (or absent when rampRate == 0).
+bool rampGoalReached(const FiringSegment& seg, float from, float to, float cur) {
+    if (seg.rampRate <= 0.f)
+        return true;
+    if (from < to)
+        return cur >= to;
+    if (from > to)
+        return cur <= to;
+    return true;
+}
+
+void setStateForActiveRampPhase(float from, float to) {
+    if (from < to)
+        appState.status.currentState = KilnState::RAMPING;
+    else if (from > to)
+        appState.status.currentState = KilnState::COOLING;
+    else
+        appState.status.currentState = KilnState::RAMPING;
+}
+
 }  // namespace
 
 FiringController::FiringController(IKilnHardware* hw, PowerOutput* po)
@@ -51,6 +73,8 @@ void FiringController::update() {
         consecutiveSensorFailures = 0;
         if (appState.status.currentState == KilnState::IDLE)
             appState.status.frozenControllerError.clear();
+        appState.status.programPeakTemperatureC     = 0.f;
+        appState.status.programRunStartTemperatureC = 0.f;
         powerOutput->setEnabled(false);
         segmentStartMs    = 0;
         programStartMs    = 0;
@@ -62,6 +86,16 @@ void FiringController::update() {
         pidTimeValid    = false;
         dFiltered       = 0.f;
         lastTemp        = 0.f;
+        return;
+    }
+
+    if (appState.status.currentState == KilnState::DONE) {
+        consecutiveSensorFailures = 0;
+        appState.status.totalTimeElapsed = (now - programStartMs) / kMsPerSecond;
+        appState.status.power            = 0.f;
+        powerOutput->setPower(0.f);
+        powerOutput->setEnabled(false);
+        powerOutput->update();
         return;
     }
 
@@ -95,6 +129,16 @@ void FiringController::armPowerIfNeeded(uint32_t now) {
     programStartMs   = now;
     segmentStartMs   = now;
     segmentStartTemp = appState.status.currentTemperature;
+
+    appState.status.programRunStartTemperatureC = appState.status.currentTemperature;
+    appState.status.programPeakTemperatureC     = 0.f;
+    if (FiringProgram* ap = appState.activeProgram()) {
+        for (const auto& s : ap->segments) {
+            if (s.targetTemperature > appState.status.programPeakTemperatureC)
+                appState.status.programPeakTemperatureC = s.targetTemperature;
+        }
+    }
+
     errorSum         = 0.f;
     lastTemp         = appState.status.currentTemperature;
     dFiltered        = 0.f;
@@ -102,6 +146,29 @@ void FiringController::armPowerIfNeeded(uint32_t now) {
     pidHasPrevious   = false;
     // No dt sample yet; first updatePID uses kInitialPidDt_sec until pidTimeValid is set.
     pidTimeValid     = false;
+}
+
+void FiringController::fastForwardCompletedRampPhases(uint32_t now, FiringProgram* prog) {
+    const float cur = appState.status.currentTemperature;
+
+    for (;;) {
+        if (currentSegmentIdx >= (int)prog->segments.size())
+            return;
+
+        FiringSegment& seg    = prog->segments[currentSegmentIdx];
+        const float      from = segmentStartTemp;
+        const float      to   = seg.targetTemperature;
+
+        if (!rampGoalReached(seg, from, to, cur)) {
+            setStateForActiveRampPhase(from, to);
+            return;
+        }
+
+        currentSegmentIdx++;
+        segmentStartTemp                   = to;
+        segmentStartMs                     = now;
+        appState.status.segmentTimeElapsed = 0;
+    }
 }
 
 void FiringController::applyTelemetryAndPid(uint32_t now, float setpoint) {
@@ -117,40 +184,62 @@ void FiringController::processSegment(uint32_t now) {
         enterErrorState("No program");
         return;
     }
+
+    if (appState.status.currentState == KilnState::RAMPING ||
+        appState.status.currentState == KilnState::COOLING) {
+        fastForwardCompletedRampPhases(now, prog);
+    }
+
     if (currentSegmentIdx >= (int)prog->segments.size()) {
-        appState.status.currentState = KilnState::IDLE;
+        appState.status.currentState = KilnState::DONE;
         return;
     }
 
     FiringSegment& seg = prog->segments[currentSegmentIdx];
     float setpoint = segmentStartTemp;
 
-    if (appState.status.currentState == KilnState::RAMPING) {
+    if (appState.status.currentState == KilnState::RAMPING ||
+        appState.status.currentState == KilnState::COOLING) {
+        if (seg.rampRate <= 0.f) {
+            appState.status.currentState = KilnState::SOAKING;
+            segmentStartMs               = now;
+            setpoint                     = seg.targetTemperature;
+            applyTelemetryAndPid(now, setpoint);
+            return;
+        }
+
         const float hoursElapsed = (now - segmentStartMs) / static_cast<float>(kMsPerHour);
         const float tempChange   = hoursElapsed * seg.rampRate;
 
         if (segmentStartTemp < seg.targetTemperature) {
             setpoint = segmentStartTemp + tempChange;
             if (setpoint >= seg.targetTemperature) {
-                setpoint = seg.targetTemperature;
+                setpoint                     = seg.targetTemperature;
                 appState.status.currentState = KilnState::SOAKING;
-                segmentStartMs = now;
+                segmentStartMs               = now;
             }
-        } else {
+        } else if (segmentStartTemp > seg.targetTemperature) {
             setpoint = segmentStartTemp - tempChange;
             if (setpoint <= seg.targetTemperature) {
-                setpoint = seg.targetTemperature;
+                setpoint                     = seg.targetTemperature;
                 appState.status.currentState = KilnState::SOAKING;
-                segmentStartMs = now;
+                segmentStartMs               = now;
             }
+        } else {
+            setpoint                     = seg.targetTemperature;
+            appState.status.currentState = KilnState::SOAKING;
+            segmentStartMs               = now;
         }
     } else if (appState.status.currentState == KilnState::SOAKING) {
-        setpoint = seg.targetTemperature;
+        setpoint                 = seg.targetTemperature;
+        const float  cur       = appState.status.currentTemperature;
         const uint32_t soakMins = (now - segmentStartMs) / kMsPerMinute;
-        if (soakMins >= seg.soakTime) {
+        const bool soakDoneByTemp =
+            seg.soakTime > 0 && cur >= seg.targetTemperature;
+        if (soakDoneByTemp || soakMins >= seg.soakTime) {
             currentSegmentIdx++;
             if (currentSegmentIdx >= (int)prog->segments.size()) {
-                appState.status.currentState = KilnState::IDLE;
+                appState.status.currentState = KilnState::DONE;
                 return;
             }
             // currentSegmentIdx is in range: 0 <= idx < segments.size() (just checked).
@@ -162,11 +251,19 @@ void FiringController::processSegment(uint32_t now) {
             appState.status.segmentTimeElapsed = 0;
 
             if (newSeg.rampRate > 0.f) {
-                appState.status.currentState = KilnState::RAMPING;
-                setpoint = segmentStartTemp;
+                if (segmentStartTemp < newSeg.targetTemperature) {
+                    appState.status.currentState = KilnState::RAMPING;
+                    setpoint                     = segmentStartTemp;
+                } else if (segmentStartTemp > newSeg.targetTemperature) {
+                    appState.status.currentState = KilnState::COOLING;
+                    setpoint                     = segmentStartTemp;
+                } else {
+                    appState.status.currentState = KilnState::SOAKING;
+                    setpoint                     = newSeg.targetTemperature;
+                }
             } else {
                 appState.status.currentState = KilnState::SOAKING;
-                setpoint = newSeg.targetTemperature;
+                setpoint                     = newSeg.targetTemperature;
             }
             applyTelemetryAndPid(now, setpoint);
             return;

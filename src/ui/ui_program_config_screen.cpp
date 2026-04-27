@@ -8,6 +8,7 @@
 #include "../model/temp_units.h"
 #include "../model/profile_generator.h"
 #include "../service/preferences_persistence.h"
+#include "../model/program_selection_snapshot.h"
 
 static constexpr lv_coord_t PAD_TOP_BAR    = 5;
 static constexpr lv_coord_t TOP_BAR_ITEM_H = 40;
@@ -37,8 +38,76 @@ static lv_obj_t *ta_soak;
 // Keep track of the currently selected custom program (-1 if predefined or "Add New")
 static int current_custom_idx = -1;
 
+/// Baseline custom program body when the dropdown last showed this index (detect unchanged saves).
+static int           s_baseline_custom_idx = -1;
+static FiringProgram s_baseline_custom;
+
 static void update_custom_segment_list();
 static void build_dropdown_options();
+
+static std::string ui_default_cone_for_slot(int slot) {
+    return slot <= 1 ? std::string("08") : std::string("5");
+}
+
+static std::string effective_cone_from_ta(int slot, const char* ta) {
+    std::string t = ta ? ta : "";
+    if (!t.empty())
+        return t;
+    return ui_default_cone_for_slot(slot);
+}
+
+static std::string effective_cone_from_stored(const FiringProgram& p, int slot) {
+    if (!p.origCone.empty())
+        return p.origCone;
+    return ui_default_cone_for_slot(slot);
+}
+
+static bool firing_program_data_equal(const FiringProgram& a, const FiringProgram& b) {
+    if (a.name != b.name || a.isCustom != b.isCustom)
+        return false;
+    if (a.origCone != b.origCone || a.origCandle != b.origCandle || a.origSoak != b.origSoak)
+        return false;
+    if (a.segments.size() != b.segments.size())
+        return false;
+    for (size_t i = 0; i < a.segments.size(); ++i) {
+        const FiringSegment& x = a.segments[i];
+        const FiringSegment& y = b.segments[i];
+        if (x.targetTemperature != y.targetTemperature || x.rampRate != y.rampRate ||
+            x.soakTime != y.soakTime)
+            return false;
+    }
+    return true;
+}
+
+/// True when saving would not change the active firing program vs current appState / baseline.
+static bool save_leaves_same_program(uint16_t selected_idx) {
+    if ((int)selected_idx != appState.activeProgramIndex)
+        return false;
+
+    if (selected_idx <= 3) {
+        const auto& p = appState.predefinedPrograms[selected_idx];
+        const char* coneStr = lv_textarea_get_text(ta_cone);
+        int         candle    = (int)atof(lv_textarea_get_text(ta_candle));
+        int         soak      = (int)atof(lv_textarea_get_text(ta_soak));
+
+        std::string coneTa = effective_cone_from_ta((int)selected_idx, coneStr);
+        std::string coneSt = effective_cone_from_stored(p, (int)selected_idx);
+        return coneTa == coneSt && p.origCandle == candle && p.origSoak == soak;
+    }
+
+    if (selected_idx == 4 + appState.customPrograms.size())
+        return false;
+
+    const int ci = (int)selected_idx - 4;
+    if (ci != current_custom_idx || ci < 0)
+        return false;
+    if ((size_t)ci >= appState.customPrograms.size())
+        return false;
+    if (s_baseline_custom_idx != ci)
+        return false;
+
+    return firing_program_data_equal(appState.customPrograms[(size_t)ci], s_baseline_custom);
+}
 
 static void build_dropdown_options() {
     std::string options = "Fast Bisque\nSlow Bisque\nFast Glaze\nSlow Glaze";
@@ -90,7 +159,13 @@ static void update_dynamic_content() {
         } else {
             current_custom_idx = selected_idx - 4;
         }
-        
+
+        if (current_custom_idx >= 0 &&
+            (size_t)current_custom_idx < appState.customPrograms.size()) {
+            s_baseline_custom_idx = current_custom_idx;
+            s_baseline_custom     = appState.customPrograms[(size_t)current_custom_idx];
+        }
+
         update_custom_segment_list();
     }
 }
@@ -103,6 +178,9 @@ static void dropdown_event_cb(lv_event_t * e) {
 
 static void save_current_program() {
     uint16_t selected_idx = lv_dropdown_get_selected(dropdown_program);
+
+    if (!save_leaves_same_program(selected_idx))
+        program_selection_capture_current_as_previous();
     
     // If predefined program selected, update active program from inputs
     if (selected_idx <= 3) {

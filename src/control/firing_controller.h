@@ -5,6 +5,8 @@
 #include "../hardware/kiln_hardware.h"
 #include "power_output.h"
 
+class FiringProgram;
+
 class FiringController {
 private:
     IKilnHardware* hardware;
@@ -33,6 +35,7 @@ private:
     uint16_t consecutiveSensorFailures = 0;
 
     void armPowerIfNeeded(uint32_t now);
+    void fastForwardCompletedRampPhases(uint32_t now, FiringProgram* prog);
     void applyTelemetryAndPid(uint32_t now, float setpoint);
     void processSegment(uint32_t now);
     void updatePID(float setpoint, float currentTemp, uint32_t now);

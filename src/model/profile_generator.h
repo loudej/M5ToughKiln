@@ -17,6 +17,9 @@ public:
     // Convert an integer cone back to the Orton string notation (e.g., -4 → "04", 6 → "6").
     static std::string coneIntToString(int coneInt);
 
+    /// Nearest standard Orton cone label from segment peak temperature (stored °C); used when `origCone` is empty (e.g. custom programs).
+    static std::string coneLabelFromPeakTempC(float peakTempC);
+
     // Estimate total firing time in minutes given a starting temperature in °C.
     static float estimateTotalMinutes(const FiringProgram& prog, float startTempC);
 

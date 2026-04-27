@@ -11,6 +11,8 @@ enum class KilnState {
     RAMPING,
     SOAKING,
     COOLING,
+    /// Program finished normally; heat off; clock still runs until operator taps DONE.
+    DONE,
     ERROR
 };
 
@@ -20,6 +22,11 @@ struct KilnStatus {
     /// Last `readSensor()` snapshot (copy of what `IKilnHardware` returned).
     KilnSensorRead sensor{};
     float targetTemperature = 25.0f;
+
+    /// Peak segment target (°C) for the active firing — set when the run arms.
+    float programPeakTemperatureC = 0.f;
+    /// Measured kiln temp (°C) when START armed — used with 75°F floor for thermal bar range.
+    float programRunStartTemperatureC = 0.f;
     // Segment soak timer: minutes elapsed in the current segment (since
     // segmentStartMs). Must stay consistent with FiringSegment::soakTime (minutes).
     uint32_t segmentTimeElapsed = 0;
