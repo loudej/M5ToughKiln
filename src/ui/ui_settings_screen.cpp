@@ -255,7 +255,7 @@ static void wifi_scan_timer_cb(lv_timer_t *t) {
 }
 
 static void refresh_unit_buttons() {
-    bool isFahrenheit = appState.tempUnit == TempUnit::FAHRENHEIT;
+    bool isFahrenheit = appState.getTempUnit() == TempUnit::FAHRENHEIT;
     if (isFahrenheit) {
         lv_obj_add_state(btn_unit_f, LV_STATE_CHECKED);
         lv_obj_clear_state(btn_unit_c, LV_STATE_CHECKED);
@@ -267,13 +267,13 @@ static void refresh_unit_buttons() {
 
 static void on_unit_f(lv_event_t *e) {
     (void)e;
-    appState.tempUnit = TempUnit::FAHRENHEIT;
+    appState.setTempUnit(TempUnit::FAHRENHEIT);
     refresh_unit_buttons();
 }
 
 static void on_unit_c(lv_event_t *e) {
     (void)e;
-    appState.tempUnit = TempUnit::CELSIUS;
+    appState.setTempUnit(TempUnit::CELSIUS);
     refresh_unit_buttons();
 }
 

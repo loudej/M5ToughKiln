@@ -9,6 +9,23 @@
 #include <cstdint>
 #include <vector>
 
+// Actual / power history (same file Tu as chart; exported to web trace API).
+static std::vector<int32_t> g_act_x;
+static std::vector<int32_t> g_act_y;
+static std::vector<int32_t> g_pwr_x;
+static std::vector<int32_t> g_pwr_y;
+
+static uint32_t g_trace_revision = 1;
+static void     bump_trace_revision() { ++g_trace_revision; }
+
+static void clear_actual_power_trace() {
+    bump_trace_revision();
+    g_act_x.clear();
+    g_act_y.clear();
+    g_pwr_x.clear();
+    g_pwr_y.clear();
+}
+
 namespace {
 
 constexpr float ROOM_TEMP_C = (70.0f - 32.0f) * 5.0f / 9.0f;
@@ -39,24 +56,6 @@ int32_t g_sched_prog_end_y_centi   = 0;
 
 std::vector<int32_t> g_prog_x;
 std::vector<int32_t> g_prog_y;
-
-/// Actual trace: wall-clock samples while firing (sec since program start, °C×10).
-std::vector<int32_t> g_act_x;
-std::vector<int32_t> g_act_y;
-
-/// Power history (same X as actual; Y = 0–100 %).
-std::vector<int32_t> g_pwr_x;
-std::vector<int32_t> g_pwr_y;
-
-const FiringProgram* active_program() {
-    int idx = appState.activeProgramIndex;
-    if (idx >= 0 && idx <= 3 && (size_t)idx < appState.predefinedPrograms.size())
-        return &appState.predefinedPrograms[idx];
-    int customIdx = idx - 4;
-    if (customIdx >= 0 && (size_t)customIdx < appState.customPrograms.size())
-        return &appState.customPrograms[customIdx];
-    return nullptr;
-}
 
 /// Piecewise schedule: same timing model as ProfileGenerator::estimateTotalMinutes + explicit soak holds.
 void build_program_vertices(const FiringProgram& prog, float startTempC,
@@ -267,7 +266,8 @@ static void chart_marker_on_event(lv_event_t* e) {
     if (code != LV_EVENT_DRAW_POST_END)
         return;
 
-    const KilnState st = appState.status.currentState;
+    const AppState::TelemetryView tv = appState.getTelemetryView();
+    const KilnState                 st = tv.status.currentState;
     if (st == KilnState::ERROR)
         return;
 
@@ -291,7 +291,7 @@ static void chart_marker_on_event(lv_event_t* e) {
     const int32_t y_ofs = coords.y1 + pad_t + border_w - lv_obj_get_scroll_top(chart);
 
     const int32_t cur_y_centi =
-        static_cast<int32_t>(appState.status.currentTemperature * static_cast<float>(kYScale));
+        static_cast<int32_t>(tv.status.currentTemperature * static_cast<float>(kYScale));
 
     auto map_xy = [&](int32_t x_sec, int32_t y_centi, int32_t* out_x, int32_t* out_y) {
         const int32_t xc = LV_CLAMP(0, x_sec, g_axis_xmax_sec);
@@ -311,7 +311,7 @@ static void chart_marker_on_event(lv_event_t* e) {
         return;
     }
 
-    const int32_t elapsed_x = static_cast<int32_t>(appState.status.totalTimeElapsed);
+    const int32_t elapsed_x = static_cast<int32_t>(tv.status.totalTimeElapsed);
 
     int32_t ox = 0;
     int32_t oy = 0;
@@ -327,7 +327,7 @@ static void chart_marker_on_event(lv_event_t* e) {
     }
 
     const int32_t tgt_centi =
-        static_cast<int32_t>(appState.status.targetTemperature * static_cast<float>(kYScale));
+        static_cast<int32_t>(tv.status.targetTemperature * static_cast<float>(kYScale));
     map_xy(elapsed_x, tgt_centi, &ox, &oy);
     map_xy(elapsed_x, cur_y_centi, &xx, &xy);
 
@@ -388,39 +388,34 @@ void ui_profile_chart_update() {
     static KilnState prev_kiln_state      = KilnState::IDLE;
     static int        idle_tracked_prog_i = -99999;
 
-    const KilnState st = appState.status.currentState;
+    static FiringProgram active_prog_snap{};
+    const AppState::TelemetryView tv       = appState.getTelemetryView();
+    const int                     activeIx = appState.getActiveProgramIndex();
+    const KilnState               st       = tv.status.currentState;
 
     if (st == KilnState::IDLE &&
         (prev_kiln_state == KilnState::RAMPING || prev_kiln_state == KilnState::SOAKING ||
          prev_kiln_state == KilnState::COOLING)) {
-        g_act_x.clear();
-        g_act_y.clear();
-        g_pwr_x.clear();
-        g_pwr_y.clear();
+        clear_actual_power_trace();
     }
 
     if (st == KilnState::RAMPING &&
         (prev_kiln_state == KilnState::IDLE || prev_kiln_state == KilnState::ERROR ||
          prev_kiln_state == KilnState::DONE)) {
-        g_act_x.clear();
-        g_act_y.clear();
-        g_pwr_x.clear();
-        g_pwr_y.clear();
+        clear_actual_power_trace();
     }
 
     if (st == KilnState::IDLE && idle_tracked_prog_i != -99999 &&
-        idle_tracked_prog_i != appState.activeProgramIndex) {
-        g_act_x.clear();
-        g_act_y.clear();
-        g_pwr_x.clear();
-        g_pwr_y.clear();
+        idle_tracked_prog_i != activeIx) {
+        clear_actual_power_trace();
     }
 
     const bool recording_trace =
         st == KilnState::RAMPING || st == KilnState::SOAKING || st == KilnState::COOLING ||
         st == KilnState::DONE;
 
-    const FiringProgram* prog = active_program();
+    const bool             haveProg = appState.tryCopyActiveProgram(&active_prog_snap);
+    const FiringProgram*   prog     = haveProg ? &active_prog_snap : nullptr;
 
     if (!prog || prog->segments.empty()) {
         g_sched_prog_end_sec     = 0;
@@ -432,7 +427,7 @@ void ui_profile_chart_update() {
                    static_cast<int32_t>(ROOM_TEMP_C * kYScale + 500));
         lv_chart_refresh(g_chart);
         prev_kiln_state      = st;
-        idle_tracked_prog_i = appState.activeProgramIndex;
+        idle_tracked_prog_i = activeIx;
         return;
     }
 
@@ -461,19 +456,21 @@ void ui_profile_chart_update() {
     ymax_c = std::max(ymax_c, g_sched_prog_end_y_centi);
 
     if (recording_trace) {
-        const uint32_t elapsed = appState.status.totalTimeElapsed;
+        const uint32_t elapsed = tv.status.totalTimeElapsed;
         const int32_t  cur_x   = static_cast<int32_t>(elapsed);
         const int32_t  cur_y =
-            static_cast<int32_t>(appState.status.currentTemperature * static_cast<float>(kYScale));
+            static_cast<int32_t>(tv.status.currentTemperature * static_cast<float>(kYScale));
 
         if (g_act_x.empty() || g_act_x.back() != cur_x) {
             const int32_t p_pct =
-                LV_CLAMP(0, static_cast<int32_t>(appState.status.power * 100.f + 0.5f), 100);
+                LV_CLAMP(0, static_cast<int32_t>(tv.status.power * 100.f + 0.5f), 100);
             g_act_x.push_back(cur_x);
             g_act_y.push_back(cur_y);
             g_pwr_x.push_back(cur_x);
             g_pwr_y.push_back(p_pct);
+            bool decimated = false;
             while (g_act_x.size() > 280) {
+                decimated = true;
                 std::vector<int32_t> nx, ny, px, py;
                 nx.reserve(g_act_x.size() / 2 + 1);
                 ny.reserve(g_act_y.size() / 2 + 1);
@@ -498,9 +495,11 @@ void ui_profile_chart_update() {
                 g_pwr_x.swap(px);
                 g_pwr_y.swap(py);
             }
+            if (decimated)
+                bump_trace_revision();
         } else {
             const int32_t p_pct =
-                LV_CLAMP(0, static_cast<int32_t>(appState.status.power * 100.f + 0.5f), 100);
+                LV_CLAMP(0, static_cast<int32_t>(tv.status.power * 100.f + 0.5f), 100);
             g_act_y.back() = cur_y;
             g_pwr_y.back() = p_pct;
         }
@@ -519,7 +518,7 @@ void ui_profile_chart_update() {
     }
 
     const int32_t tgt_centi_idle =
-        static_cast<int32_t>(appState.status.targetTemperature * static_cast<float>(kYScale));
+        static_cast<int32_t>(tv.status.targetTemperature * static_cast<float>(kYScale));
     ymin_c = std::min(ymin_c, tgt_centi_idle);
     ymax_c = std::max(ymax_c, tgt_centi_idle);
 
@@ -547,5 +546,23 @@ void ui_profile_chart_update() {
     lv_chart_refresh(g_chart);
 
     prev_kiln_state      = st;
-    idle_tracked_prog_i = appState.activeProgramIndex;
+    idle_tracked_prog_i = activeIx;
+}
+
+uint32_t ui_profile_chart_trace_revision() {
+    return g_trace_revision;
+}
+
+size_t ui_profile_chart_trace_points() {
+    return g_act_x.size();
+}
+
+bool ui_profile_chart_trace_point(size_t i, int32_t* t_sec, float* temp_celsius, int* power_pct) {
+    if (!t_sec || !temp_celsius || !power_pct || i >= g_act_x.size())
+        return false;
+    constexpr float kDegScale = 10.f;
+    *t_sec          = g_act_x[i];
+    *temp_celsius   = static_cast<float>(g_act_y[i]) / kDegScale;
+    *power_pct      = static_cast<int>(g_pwr_y[i]);
+    return true;
 }

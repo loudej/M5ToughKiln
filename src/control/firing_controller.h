@@ -2,6 +2,7 @@
 #define FIRING_CONTROLLER_H
 
 #include <cstdint>
+#include <string>
 #include "../hardware/kiln_hardware.h"
 #include "power_output.h"
 
@@ -33,6 +34,9 @@ private:
     float    segmentStartTemp  = 25.0f;
 
     uint16_t consecutiveSensorFailures = 0;
+
+    void enterErrorState(std::string message);
+    void setStateForActiveRampPhase(float from, float to);
 
     void armPowerIfNeeded(uint32_t now);
     void fastForwardCompletedRampPhases(uint32_t now, FiringProgram* prog);

@@ -1,5 +1,4 @@
 #include "power_output.h"
-#include "../model/app_state.h"
 #include <M5Unified.h>
 #include <Arduino.h>
 
@@ -15,7 +14,6 @@ void PowerOutput::setEnabled(bool enabled) {
         _power = 0.0f;
         _relayOnMs = 0;
         _windowOnMs = 0;
-        appState.status.power = 0.0f;
         _appliedOn = false;
         _lastTransitionMs = millis();
         _hardware->setRelay(false);
@@ -25,7 +23,6 @@ void PowerOutput::setEnabled(bool enabled) {
     _power = 0.0f;
     _relayOnMs = 0;
     _windowOnMs = 0;
-    appState.status.power = 0.0f;
     _appliedOn = false;
     _windowStartMs = millis();
     _lastTransitionMs = _windowStartMs;
@@ -37,7 +34,6 @@ void PowerOutput::setPower(float power) {
     if (power > 1.0f) power = 1.0f;
     _power = power;
     _relayOnMs = (uint32_t)(_power * WINDOW_MS);
-    appState.status.power = _power;
 }
 
 void PowerOutput::update() {

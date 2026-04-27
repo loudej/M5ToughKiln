@@ -39,19 +39,13 @@ static lv_obj_t *lbl_btn_start;
 static lv_obj_t *btn_config;
 static lv_obj_t *btn_go_back;
 
-static const FiringProgram* get_active_program() {
-    int idx = appState.activeProgramIndex;
-    if (idx >= 0 && idx <= 3 && (size_t)idx < appState.predefinedPrograms.size())
-        return &appState.predefinedPrograms[idx];
-    int customIdx = idx - 4;
-    if (customIdx >= 0 && (size_t)customIdx < appState.customPrograms.size())
-        return &appState.customPrograms[customIdx];
-    return nullptr;
+static bool copy_active_program(FiringProgram* out) {
+    return appState.tryCopyActiveProgram(out);
 }
 
-static void update_idle_program_labels() {
-    const FiringProgram* prog = get_active_program();
-    if (!prog || prog->segments.empty()) {
+static void update_idle_program_labels(TempUnit tu) {
+    FiringProgram prog{};
+    if (!copy_active_program(&prog) || prog.segments.empty()) {
         lv_label_set_text(lbl_target_left, "--");
         lv_label_set_text(lbl_target_peak, "--");
         lv_label_set_text(lbl_time_left, "");
@@ -60,22 +54,22 @@ static void update_idle_program_labels() {
     }
 
     float peakC = 0;
-    for (const auto& seg : prog->segments) {
+    for (const auto& seg : prog.segments) {
         if (seg.targetTemperature > peakC) peakC = seg.targetTemperature;
     }
-    const float peakDisp = toDisplayTemp(peakC, appState.tempUnit);
+    const float peakDisp = toDisplayTemp(peakC, tu);
 
     std::string coneStr;
-    if (!prog->origCone.empty())
-        coneStr = prog->origCone;
+    if (!prog.origCone.empty())
+        coneStr = prog.origCone;
     else
         coneStr = ProfileGenerator::coneLabelFromPeakTempC(peakC);
 
     lv_label_set_text_fmt(lbl_target_left, "Cone %s", coneStr.c_str());
     lv_label_set_text_fmt(lbl_target_peak, "%.0f\xc2\xb0%s", peakDisp,
-                          unitSymbol(appState.tempUnit));
+                          unitSymbol(tu));
 
-    float totalMins = ProfileGenerator::estimateTotalMinutes(*prog, ROOM_TEMP_C);
+    float totalMins = ProfileGenerator::estimateTotalMinutes(prog, ROOM_TEMP_C);
     int   h         = static_cast<int>(totalMins) / 60;
     int   m         = static_cast<int>(totalMins) % 60;
     lv_label_set_text(lbl_time_left, "");
@@ -105,13 +99,7 @@ static void btn_start_event_cb(lv_event_t * e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED)
         return;
 
-    const KilnState s = appState.status.currentState;
-    if (s == KilnState::IDLE) {
-        appState.status.currentState = KilnState::RAMPING;
-    } else {
-        appState.status.currentState = KilnState::IDLE;
-        appState.status.frozenControllerError.clear();
-    }
+    appState.applyStartStopTap();
     ui_main_screen_update();
 }
 
@@ -338,16 +326,16 @@ lv_obj_t* ui_main_screen_get() {
 void ui_main_screen_update() {
     if (!main_screen) return;
 
-    // Update current temperature with degree symbol
-    float dispTemp = toDisplayTemp(appState.status.currentTemperature, appState.tempUnit);
-    lv_label_set_text_fmt(lbl_temp, "%.1f\xc2\xb0%s", dispTemp, unitSymbol(appState.tempUnit));
-    lv_label_set_text_fmt(lbl_program, "%s", appState.status.activeProgramName.c_str());
+    const AppState::TelemetryView tv = appState.getTelemetryView();
 
-    lv_label_set_text_fmt(lbl_power, "%.0f%%", appState.status.power * 100.0f);
+    float dispTemp = toDisplayTemp(tv.status.currentTemperature, tv.tempUnit);
+    lv_label_set_text_fmt(lbl_temp, "%.1f\xc2\xb0%s", dispTemp, unitSymbol(tv.tempUnit));
+    lv_label_set_text_fmt(lbl_program, "%s", tv.status.activeProgramName.c_str());
 
-    // Update state dependent UI
-    if (appState.status.currentState == KilnState::IDLE) {
-        const KilnSensorRead& sr = appState.status.sensor;
+    lv_label_set_text_fmt(lbl_power, "%.0f%%", tv.status.power * 100.0f);
+
+    if (tv.status.currentState == KilnState::IDLE) {
+        const KilnSensorRead& sr = tv.status.sensor;
         if (!sr.hardwareInitialized || !sr.communicationOk) {
             lv_label_set_text(lbl_status, "NO SENSOR");
             lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_ORANGE), 0);
@@ -360,33 +348,33 @@ void ui_main_screen_update() {
             lv_label_set_text(lbl_status, "IDLE");
             lv_obj_set_style_text_color(lbl_status, lv_color_white(), 0);
         }
-        update_idle_program_labels();
+        update_idle_program_labels(tv.tempUnit);
         lv_obj_add_flag(bar_power, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(bar_thermal, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(bar_progress, LV_OBJ_FLAG_HIDDEN);
         lv_label_set_text(lbl_btn_start, "START");
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_GREEN), 0);
         lv_obj_clear_state(btn_config, LV_STATE_DISABLED);
-    } else if (appState.status.currentState == KilnState::DONE) {
+    } else if (tv.status.currentState == KilnState::DONE) {
         lv_label_set_text(lbl_status, "COMPLETE");
         lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_GREEN), 0);
 
-        float dispTarget = toDisplayTemp(appState.status.targetTemperature, appState.tempUnit);
-        const char* sym = unitSymbol(appState.tempUnit);
+        float dispTarget = toDisplayTemp(tv.status.targetTemperature, tv.tempUnit);
+        const char* sym = unitSymbol(tv.tempUnit);
         lv_obj_clear_flag(bar_power, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(bar_thermal, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(bar_progress, LV_OBJ_FLAG_HIDDEN);
         lv_bar_set_value(bar_power,
-                         static_cast<int32_t>(appState.status.power * 100.f + 0.5f),
+                         static_cast<int32_t>(tv.status.power * 100.f + 0.5f),
                          LV_ANIM_OFF);
         lv_label_set_text_fmt(lbl_target_left, "%.1f\xc2\xb0%s", dispTarget, sym);
 
         {
             const float floorC =
                 std::min(fromDisplayTemp(75.0f, TempUnit::FAHRENHEIT),
-                         appState.status.programRunStartTemperatureC);
-            const float peakC = appState.status.programPeakTemperatureC;
-            const float tgtC  = appState.status.targetTemperature;
+                         tv.status.programRunStartTemperatureC);
+            const float peakC = tv.status.programPeakTemperatureC;
+            const float tgtC  = tv.status.targetTemperature;
             float       span  = peakC - floorC;
             int         pct   = 0;
             if (span > 1e-4f)
@@ -397,12 +385,12 @@ void ui_main_screen_update() {
             if (pct > 100) pct = 100;
             lv_bar_set_value(bar_thermal, pct, LV_ANIM_OFF);
 
-            float dPeak = toDisplayTemp(peakC, appState.tempUnit);
+            float dPeak = toDisplayTemp(peakC, tv.tempUnit);
             lv_label_set_text_fmt(lbl_target_peak, "%.0f\xc2\xb0%s", dPeak, sym);
             lv_obj_set_style_bg_color(bar_thermal, lv_palette_main(LV_PALETTE_GREEN), LV_PART_INDICATOR);
         }
 
-        uint32_t elapsedSec = appState.status.totalTimeElapsed;
+        uint32_t elapsedSec = tv.status.totalTimeElapsed;
         lv_label_set_text_fmt(lbl_time_left, "%u:%02u",
                               elapsedSec / 3600, (elapsedSec % 3600) / 60);
         lv_label_set_text_fmt(lbl_time_right, "%u:%02u", 0u, 0u);
@@ -411,14 +399,14 @@ void ui_main_screen_update() {
         lv_label_set_text(lbl_btn_start, "DONE");
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_BLUE_GREY), 0);
         lv_obj_add_state(btn_config, LV_STATE_DISABLED);
-    } else if (appState.status.currentState == KilnState::ERROR) {
-        if (!appState.status.frozenControllerError.empty()) {
-            lv_label_set_text(lbl_status, appState.status.frozenControllerError.c_str());
+    } else if (tv.status.currentState == KilnState::ERROR) {
+        if (!tv.status.frozenControllerError.empty()) {
+            lv_label_set_text(lbl_status, tv.status.frozenControllerError.c_str());
         } else {
             lv_label_set_text(lbl_status, "ERROR: Unknown");
         }
         lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_RED), 0);
-        update_idle_program_labels();
+        update_idle_program_labels(tv.tempUnit);
         lv_obj_add_flag(bar_power, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(bar_thermal, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(bar_progress, LV_OBJ_FLAG_HIDDEN);
@@ -426,8 +414,7 @@ void ui_main_screen_update() {
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_RED), 0);
         lv_obj_clear_state(btn_config, LV_STATE_DISABLED);
     } else {
-        // Running states (Ramping, Soaking, Cooling)
-        const KilnSensorRead& sr = appState.status.sensor;
+        const KilnSensorRead& sr = tv.status.sensor;
         if (!sr.controlUsable()) {
             if (sr.deviceReportsFault()) {
                 char faultLine[28];
@@ -439,31 +426,31 @@ void ui_main_screen_update() {
             lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_ORANGE), 0);
         } else {
             lv_obj_set_style_text_color(lbl_status, lv_color_white(), 0);
-            if (appState.status.currentState == KilnState::RAMPING) {
+            if (tv.status.currentState == KilnState::RAMPING) {
                 lv_label_set_text(lbl_status, "RAMPING");
-            } else if (appState.status.currentState == KilnState::SOAKING) {
+            } else if (tv.status.currentState == KilnState::SOAKING) {
                 lv_label_set_text(lbl_status, "SOAKING");
-            } else if (appState.status.currentState == KilnState::COOLING) {
+            } else if (tv.status.currentState == KilnState::COOLING) {
                 lv_label_set_text(lbl_status, "COOLING");
             }
         }
 
-        float dispTarget = toDisplayTemp(appState.status.targetTemperature, appState.tempUnit);
-        const char* sym = unitSymbol(appState.tempUnit);
+        float dispTarget = toDisplayTemp(tv.status.targetTemperature, tv.tempUnit);
+        const char* sym = unitSymbol(tv.tempUnit);
         lv_obj_clear_flag(bar_power, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(bar_thermal, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(bar_progress, LV_OBJ_FLAG_HIDDEN);
         lv_bar_set_value(bar_power,
-                         static_cast<int32_t>(appState.status.power * 100.f + 0.5f),
+                         static_cast<int32_t>(tv.status.power * 100.f + 0.5f),
                          LV_ANIM_OFF);
         lv_label_set_text_fmt(lbl_target_left, "%.1f\xc2\xb0%s", dispTarget, sym);
 
         {
             const float floorC =
                 std::min(fromDisplayTemp(75.0f, TempUnit::FAHRENHEIT),
-                         appState.status.programRunStartTemperatureC);
-            const float peakC = appState.status.programPeakTemperatureC;
-            const float tgtC  = appState.status.targetTemperature;
+                         tv.status.programRunStartTemperatureC);
+            const float peakC = tv.status.programPeakTemperatureC;
+            const float tgtC  = tv.status.targetTemperature;
             float       span  = peakC - floorC;
             int         pct   = 0;
             if (span > 1e-4f)
@@ -474,11 +461,11 @@ void ui_main_screen_update() {
             if (pct > 100) pct = 100;
             lv_bar_set_value(bar_thermal, pct, LV_ANIM_OFF);
 
-            float dPeak = toDisplayTemp(peakC, appState.tempUnit);
+            float dPeak = toDisplayTemp(peakC, tv.tempUnit);
             lv_label_set_text_fmt(lbl_target_peak, "%.0f\xc2\xb0%s", dPeak, sym);
 
             lv_color_t indCol;
-            switch (appState.status.currentState) {
+            switch (tv.status.currentState) {
                 case KilnState::RAMPING:
                     indCol = lv_palette_main(LV_PALETTE_RED);
                     break;
@@ -495,12 +482,15 @@ void ui_main_screen_update() {
             lv_obj_set_style_bg_color(bar_thermal, indCol, LV_PART_INDICATOR);
         }
 
-        uint32_t elapsedSec = appState.status.totalTimeElapsed;
+        uint32_t elapsedSec = tv.status.totalTimeElapsed;
         lv_label_set_text_fmt(lbl_time_left, "%u:%02u",
                               elapsedSec / 3600, (elapsedSec % 3600) / 60);
 
-        const FiringProgram* prog = get_active_program();
-        float totalSec = prog ? ProfileGenerator::estimateTotalMinutes(*prog, ROOM_TEMP_C) * 60.0f : 0.0f;
+        FiringProgram runProg{};
+        float        totalSec =
+            appState.tryCopyActiveProgram(&runProg)
+                ? ProfileGenerator::estimateTotalMinutes(runProg, ROOM_TEMP_C) * 60.0f
+                : 0.0f;
 
         float remSec = (totalSec > (float)elapsedSec) ? totalSec - (float)elapsedSec : 0.0f;
         uint32_t remSecU = (uint32_t)remSec;
@@ -517,7 +507,7 @@ void ui_main_screen_update() {
     }
 
     {
-        const KilnState navState = appState.status.currentState;
+        const KilnState navState = tv.status.currentState;
         const bool progPickEnabled =
             (navState == KilnState::IDLE || navState == KilnState::ERROR);
         const bool prevOk = g_previous_program_selection.valid;

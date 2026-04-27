@@ -81,11 +81,13 @@ static bool firing_program_data_equal(const FiringProgram& a, const FiringProgra
 
 /// True when saving would not change the active firing program vs current appState / baseline.
 static bool save_leaves_same_program(uint16_t selected_idx) {
-    if ((int)selected_idx != appState.activeProgramIndex)
+    if ((int)selected_idx != appState.getActiveProgramIndex())
         return false;
 
     if (selected_idx <= 3) {
-        const auto& p = appState.predefinedPrograms[selected_idx];
+        FiringProgram p{};
+        if (!appState.tryCopyPredefinedProgram(selected_idx, &p))
+            return false;
         const char* coneStr = lv_textarea_get_text(ta_cone);
         int         candle    = (int)atof(lv_textarea_get_text(ta_candle));
         int         soak      = (int)atof(lv_textarea_get_text(ta_soak));
@@ -95,24 +97,28 @@ static bool save_leaves_same_program(uint16_t selected_idx) {
         return coneTa == coneSt && p.origCandle == candle && p.origSoak == soak;
     }
 
-    if (selected_idx == 4 + appState.customPrograms.size())
+    const size_t customCount = appState.getCustomProgramCount();
+    if (selected_idx == 4 + customCount)
         return false;
 
     const int ci = (int)selected_idx - 4;
     if (ci != current_custom_idx || ci < 0)
         return false;
-    if ((size_t)ci >= appState.customPrograms.size())
+    if ((size_t)ci >= customCount)
         return false;
     if (s_baseline_custom_idx != ci)
         return false;
 
-    return firing_program_data_equal(appState.customPrograms[(size_t)ci], s_baseline_custom);
+    FiringProgram cur{};
+    if (!appState.tryCopyCustomProgram((size_t)ci, &cur))
+        return false;
+    return firing_program_data_equal(cur, s_baseline_custom);
 }
 
 static void build_dropdown_options() {
     std::string options = "Fast Bisque\nSlow Bisque\nFast Glaze\nSlow Glaze";
-    for (size_t i = 0; i < appState.customPrograms.size(); ++i) {
-        options += "\n" + appState.customPrograms[i].name;
+    for (const auto& name : appState.getCustomProgramNames()) {
+        options += "\n" + name;
     }
     options += "\nAdd New Custom";
     lv_dropdown_set_options(dropdown_program, options.c_str());
@@ -120,16 +126,16 @@ static void build_dropdown_options() {
 
 static void update_dynamic_content() {
     uint16_t selected_idx = lv_dropdown_get_selected(dropdown_program);
-    
-    // Options 0-3 are the predefined programs
+
     if (selected_idx <= 3) {
         current_custom_idx = -1;
         lv_obj_clear_flag(cont_predefined, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(cont_custom, LV_OBJ_FLAG_HIDDEN);
 
-        // Pre-fill from memory, or default if empty
-        const auto& preProg = appState.predefinedPrograms[selected_idx];
-        
+        FiringProgram preProg{};
+        if (!appState.tryCopyPredefinedProgram(selected_idx, &preProg))
+            return;
+
         if (preProg.origCone.empty()) {
             lv_textarea_set_text(ta_cone, selected_idx <= 1 ? "08" : "5");
             lv_textarea_set_text(ta_candle, "");
@@ -140,20 +146,18 @@ static void update_dynamic_content() {
             lv_textarea_set_text(ta_soak, preProg.origSoak == 0 ? "" : std::to_string(preProg.origSoak).c_str());
         }
     } else {
-        // Otherwise, it's a custom program or "Add New"
         lv_obj_add_flag(cont_predefined, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(cont_custom, LV_OBJ_FLAG_HIDDEN);
 
-        
-        if (selected_idx == 4 + appState.customPrograms.size()) {
-            // "Add New Custom" selected
-            current_custom_idx = appState.customPrograms.size(); // It will be the next index
+        const size_t customCount = appState.getCustomProgramCount();
+
+        if (selected_idx == 4 + customCount) {
+            current_custom_idx = static_cast<int>(customCount);
             FiringProgram newProg;
             newProg.name = "Custom " + std::to_string(current_custom_idx + 1);
             newProg.isCustom = true;
-            appState.customPrograms.push_back(newProg);
-            
-            // Rebuild options and select the newly added program
+            appState.appendCustomProgram(std::move(newProg));
+
             build_dropdown_options();
             lv_dropdown_set_selected(dropdown_program, 4 + current_custom_idx);
         } else {
@@ -161,9 +165,9 @@ static void update_dynamic_content() {
         }
 
         if (current_custom_idx >= 0 &&
-            (size_t)current_custom_idx < appState.customPrograms.size()) {
+            (size_t)current_custom_idx < appState.getCustomProgramCount()) {
             s_baseline_custom_idx = current_custom_idx;
-            s_baseline_custom     = appState.customPrograms[(size_t)current_custom_idx];
+            appState.tryCopyCustomProgram(static_cast<size_t>(current_custom_idx), &s_baseline_custom);
         }
 
         update_custom_segment_list();
@@ -181,31 +185,25 @@ static void save_current_program() {
 
     if (!save_leaves_same_program(selected_idx))
         program_selection_capture_current_as_previous();
-    
-    // If predefined program selected, update active program from inputs
+
     if (selected_idx <= 3) {
         const char* coneStr = lv_textarea_get_text(ta_cone);
-        float candle = atof(lv_textarea_get_text(ta_candle));
-        float soak = atof(lv_textarea_get_text(ta_soak));
-        
-        // Re-generate the program based on current text inputs
-        if (selected_idx == 0) appState.predefinedPrograms[0] = ProfileGenerator::generateFastBisque(coneStr, candle, soak);
-        else if (selected_idx == 1) appState.predefinedPrograms[1] = ProfileGenerator::generateSlowBisque(coneStr, candle, soak);
-        else if (selected_idx == 2) appState.predefinedPrograms[2] = ProfileGenerator::generateFastGlaze(coneStr, candle, soak);
-        else if (selected_idx == 3) appState.predefinedPrograms[3] = ProfileGenerator::generateSlowGlaze(coneStr, candle, soak);
+        float candle = static_cast<float>(atof(lv_textarea_get_text(ta_candle)));
+        float soak   = static_cast<float>(atof(lv_textarea_get_text(ta_soak)));
+
+        if (selected_idx == 0)
+            appState.setPredefinedProgram(0, ProfileGenerator::generateFastBisque(coneStr, candle, soak));
+        else if (selected_idx == 1)
+            appState.setPredefinedProgram(1, ProfileGenerator::generateSlowBisque(coneStr, candle, soak));
+        else if (selected_idx == 2)
+            appState.setPredefinedProgram(2, ProfileGenerator::generateFastGlaze(coneStr, candle, soak));
+        else if (selected_idx == 3)
+            appState.setPredefinedProgram(3, ProfileGenerator::generateSlowGlaze(coneStr, candle, soak));
     }
-    
-    appState.activeProgramIndex = selected_idx;
-    if (selected_idx <= 3) {
-        appState.status.activeProgramName = appState.predefinedPrograms[selected_idx].name;
-    } else {
-        // Handle Custom program selection...
-        if (current_custom_idx >= 0 && current_custom_idx < appState.customPrograms.size()) {
-             appState.status.activeProgramName = appState.customPrograms[current_custom_idx].name;
-        }
-    }
-    
-    persistence.saveCustomPrograms(appState.customPrograms);
+
+    appState.setActiveProgramIndex(static_cast<int>(selected_idx));
+
+    persistence.saveCustomPrograms();
 }
 
 static void btn_back_event_cb(lv_event_t * e) {
@@ -218,7 +216,7 @@ static void btn_back_event_cb(lv_event_t * e) {
 static void btn_start_event_cb(lv_event_t * e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         save_current_program();
-        appState.status.currentState = KilnState::RAMPING;
+        appState.setKilnStateFromProgramConfigStart();
         ui_switch_to_main_screen();
     }
 }
@@ -296,38 +294,38 @@ static void btn_delete_segment_cb(lv_event_t * e) {
     if (lv_event_get_code(e) == LV_EVENT_CLICKED) {
         int seg_idx = (int)(intptr_t)lv_event_get_user_data(e);
         if (current_custom_idx >= 0 && seg_idx >= 0) {
-            auto& segs = appState.customPrograms[current_custom_idx].segments;
-            if (seg_idx < segs.size()) {
-                segs.erase(segs.begin() + seg_idx);
-                update_custom_segment_list();
-            }
+            appState.eraseCustomSegment(static_cast<size_t>(current_custom_idx), static_cast<size_t>(seg_idx));
+            update_custom_segment_list();
         }
     }
 }
 
 static void update_custom_segment_list() {
-    if (current_custom_idx < 0 || current_custom_idx >= appState.customPrograms.size()) return;
-    
-    lv_obj_clean(list_segments); // Clear existing list items
+    if (current_custom_idx < 0 || static_cast<size_t>(current_custom_idx) >= appState.getCustomProgramCount())
+        return;
 
-    const auto& prog = appState.customPrograms[current_custom_idx];
-    
+    lv_obj_clean(list_segments);
+
+    FiringProgram prog{};
+    if (!appState.tryCopyCustomProgram(static_cast<size_t>(current_custom_idx), &prog))
+        return;
+
+    const TempUnit tu = appState.getTempUnit();
+
     for (size_t i = 0; i < prog.segments.size(); ++i) {
         const auto& seg = prog.segments[i];
-        
-        // Make the entire row a clickable button
+
         lv_obj_t * btn_edit = lv_btn_create(list_segments);
         lv_obj_set_style_bg_color(btn_edit, lv_color_hex(0x282b30), 0);
-        auto theme = lv_theme_default_get();
         lv_obj_set_width(btn_edit, lv_pct(100));
         lv_obj_set_height(btn_edit, LV_SIZE_CONTENT);
         lv_obj_add_event_cb(btn_edit, btn_edit_segment_cb, LV_EVENT_CLICKED, (void*)(intptr_t)i);
-        
+
         lv_obj_t * lbl_summary = lv_label_create(btn_edit);
         char buf[64];
-        const char* unit = unitSymbol(appState.tempUnit);
-        float dispTarget = toDisplayTemp(seg.targetTemperature, appState.tempUnit);
-        float dispRate   = toDisplayRate(seg.rampRate, appState.tempUnit);
+        const char* unit = unitSymbol(tu);
+        float dispTarget = toDisplayTemp(seg.targetTemperature, tu);
+        float dispRate   = toDisplayRate(seg.rampRate, tu);
         if (seg.soakTime > 0) {
             snprintf(buf, sizeof(buf), "%.0f\xc2\xb0%s  %.0f\xc2\xb0%s/h  %dm",
                      dispTarget, unit, dispRate, unit, seg.soakTime);
@@ -339,7 +337,6 @@ static void update_custom_segment_list() {
         lv_obj_center(lbl_summary);
     }
 
-    // Add Segment Button at the bottom
     lv_obj_t * btn_add = lv_btn_create(list_segments);
     lv_obj_set_size(btn_add, lv_pct(100), LV_SIZE_CONTENT);
     lv_obj_add_event_cb(btn_add, btn_add_segment_cb, LV_EVENT_CLICKED, NULL);
@@ -431,7 +428,7 @@ void ui_program_config_screen_create() {
 
     // Populate dropdown and select active
     build_dropdown_options();
-    lv_dropdown_set_selected(dropdown_program, appState.activeProgramIndex);
+    lv_dropdown_set_selected(dropdown_program, static_cast<uint16_t>(appState.getActiveProgramIndex()));
     
     // Trigger initial state
     update_dynamic_content();

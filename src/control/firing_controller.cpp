@@ -7,13 +7,6 @@
 
 namespace {
 
-void enterErrorState(std::string message) {
-    if (appState.status.currentState == KilnState::ERROR)
-        return;
-    appState.status.currentState           = KilnState::ERROR;
-    appState.status.frozenControllerError = std::move(message);
-}
-
 constexpr uint32_t kMsPerSecond = 1000;
 constexpr uint32_t kMsPerMinute = 60000;
 constexpr uint32_t kMsPerHour   = 3600000;
@@ -46,16 +39,23 @@ bool rampGoalReached(const FiringSegment& seg, float from, float to, float cur) 
     return true;
 }
 
-void setStateForActiveRampPhase(float from, float to) {
-    if (from < to)
-        appState.status.currentState = KilnState::RAMPING;
-    else if (from > to)
-        appState.status.currentState = KilnState::COOLING;
-    else
-        appState.status.currentState = KilnState::RAMPING;
+}  // namespace
+
+void FiringController::enterErrorState(std::string message) {
+    if (appState.status_.currentState == KilnState::ERROR)
+        return;
+    appState.status_.currentState           = KilnState::ERROR;
+    appState.status_.frozenControllerError = std::move(message);
 }
 
-}  // namespace
+void FiringController::setStateForActiveRampPhase(float from, float to) {
+    if (from < to)
+        appState.status_.currentState = KilnState::RAMPING;
+    else if (from > to)
+        appState.status_.currentState = KilnState::COOLING;
+    else
+        appState.status_.currentState = KilnState::RAMPING;
+}
 
 FiringController::FiringController(IKilnHardware* hw, PowerOutput* po)
     : hardware(hw), powerOutput(po) {}
@@ -63,24 +63,32 @@ FiringController::FiringController(IKilnHardware* hw, PowerOutput* po)
 void FiringController::update() {
     const uint32_t now = millis();
 
-    if (now - lastUpdateMs < kUpdateIntervalMs) return;
+    if (lastUpdateMs != 0) {
+        const uint32_t dt = now - lastUpdateMs;
+        if (dt >= kUpdateIntervalMs + 10) {
+            Serial.printf("[FiringController] update cadence late: dt=%lu ms (nominal %lu ms)\n",
+                          static_cast<unsigned long>(dt),
+                          static_cast<unsigned long>(kUpdateIntervalMs));
+        }
+    }
+
     lastUpdateMs = now;
 
-    appState.status.sensor             = hardware->readSensor();
-    appState.status.currentTemperature = appState.status.sensor.thermocoupleCelsius;
+    appState.status_.sensor             = hardware->readSensor();
+    appState.status_.currentTemperature = appState.status_.sensor.thermocoupleCelsius;
 
-    if (appState.status.currentState == KilnState::IDLE || appState.status.currentState == KilnState::ERROR) {
+    if (appState.status_.currentState == KilnState::IDLE || appState.status_.currentState == KilnState::ERROR) {
         consecutiveSensorFailures = 0;
-        if (appState.status.currentState == KilnState::IDLE)
-            appState.status.frozenControllerError.clear();
-        appState.status.programPeakTemperatureC     = 0.f;
-        appState.status.programRunStartTemperatureC = 0.f;
+        if (appState.status_.currentState == KilnState::IDLE)
+            appState.status_.frozenControllerError.clear();
+        appState.status_.programPeakTemperatureC     = 0.f;
+        appState.status_.programRunStartTemperatureC = 0.f;
         powerOutput->setEnabled(false);
         segmentStartMs    = 0;
         programStartMs    = 0;
         currentSegmentIdx = 0;
-        appState.status.totalTimeElapsed   = 0;
-        appState.status.segmentTimeElapsed = 0;
+        appState.status_.totalTimeElapsed   = 0;
+        appState.status_.segmentTimeElapsed = 0;
         lastPidMs       = 0;
         pidHasPrevious  = false;
         pidTimeValid    = false;
@@ -89,26 +97,26 @@ void FiringController::update() {
         return;
     }
 
-    if (appState.status.currentState == KilnState::DONE) {
+    if (appState.status_.currentState == KilnState::DONE) {
         consecutiveSensorFailures = 0;
-        appState.status.totalTimeElapsed = (now - programStartMs) / kMsPerSecond;
-        appState.status.power            = 0.f;
+        appState.status_.totalTimeElapsed = (now - programStartMs) / kMsPerSecond;
+        appState.status_.power            = 0.f;
         powerOutput->setPower(0.f);
         powerOutput->setEnabled(false);
         powerOutput->update();
         return;
     }
 
-    if (!appState.status.sensor.controlUsable()) {
+    if (!appState.status_.sensor.controlUsable()) {
         consecutiveSensorFailures++;
         if (consecutiveSensorFailures >= kMaxConsecutiveSensorFailures) {
-            const KilnSensorRead& sr = appState.status.sensor;
+            const KilnSensorRead& sr = appState.status_.sensor;
             if (sr.deviceReportsFault()) {
                 char detail[32];
                 kilnFormatStatusFaultLine(sr.statusRegister, detail, sizeof detail);
-                enterErrorState("ERROR: "+std::string(detail));
+                this->enterErrorState("ERROR: "+std::string(detail));
             } else {
-                enterErrorState("ERROR: Sensor lost");
+                this->enterErrorState("ERROR: Sensor lost");
             }
         }
         powerOutput->setPower(0.f);
@@ -128,19 +136,19 @@ void FiringController::armPowerIfNeeded(uint32_t now) {
     powerOutput->setEnabled(true);
     programStartMs   = now;
     segmentStartMs   = now;
-    segmentStartTemp = appState.status.currentTemperature;
+    segmentStartTemp = appState.status_.currentTemperature;
 
-    appState.status.programRunStartTemperatureC = appState.status.currentTemperature;
-    appState.status.programPeakTemperatureC     = 0.f;
-    if (FiringProgram* ap = appState.activeProgram()) {
+    appState.status_.programRunStartTemperatureC = appState.status_.currentTemperature;
+    appState.status_.programPeakTemperatureC     = 0.f;
+    if (FiringProgram* ap = appState.mutableActiveProgram()) {
         for (const auto& s : ap->segments) {
-            if (s.targetTemperature > appState.status.programPeakTemperatureC)
-                appState.status.programPeakTemperatureC = s.targetTemperature;
+            if (s.targetTemperature > appState.status_.programPeakTemperatureC)
+                appState.status_.programPeakTemperatureC = s.targetTemperature;
         }
     }
 
     errorSum         = 0.f;
-    lastTemp         = appState.status.currentTemperature;
+    lastTemp         = appState.status_.currentTemperature;
     dFiltered        = 0.f;
     lastPidMs        = 0;
     pidHasPrevious   = false;
@@ -149,7 +157,7 @@ void FiringController::armPowerIfNeeded(uint32_t now) {
 }
 
 void FiringController::fastForwardCompletedRampPhases(uint32_t now, FiringProgram* prog) {
-    const float cur = appState.status.currentTemperature;
+    const float cur = appState.status_.currentTemperature;
 
     for (;;) {
         if (currentSegmentIdx >= (int)prog->segments.size())
@@ -167,41 +175,41 @@ void FiringController::fastForwardCompletedRampPhases(uint32_t now, FiringProgra
         currentSegmentIdx++;
         segmentStartTemp                   = to;
         segmentStartMs                     = now;
-        appState.status.segmentTimeElapsed = 0;
+        appState.status_.segmentTimeElapsed = 0;
     }
 }
 
 void FiringController::applyTelemetryAndPid(uint32_t now, float setpoint) {
-    appState.status.segmentTimeElapsed = (now - segmentStartMs) / kMsPerMinute;
-    appState.status.totalTimeElapsed   = (now - programStartMs) / kMsPerSecond;
-    appState.status.targetTemperature  = setpoint;
-    updatePID(setpoint, appState.status.currentTemperature, now);
+    appState.status_.segmentTimeElapsed = (now - segmentStartMs) / kMsPerMinute;
+    appState.status_.totalTimeElapsed   = (now - programStartMs) / kMsPerSecond;
+    appState.status_.targetTemperature  = setpoint;
+    updatePID(setpoint, appState.status_.currentTemperature, now);
 }
 
 void FiringController::processSegment(uint32_t now) {
-    FiringProgram* prog = appState.activeProgram();
+    FiringProgram* prog = appState.mutableActiveProgram();
     if (!prog) {
-        enterErrorState("No program");
+        this->enterErrorState("No program");
         return;
     }
 
-    if (appState.status.currentState == KilnState::RAMPING ||
-        appState.status.currentState == KilnState::COOLING) {
+    if (appState.status_.currentState == KilnState::RAMPING ||
+        appState.status_.currentState == KilnState::COOLING) {
         fastForwardCompletedRampPhases(now, prog);
     }
 
     if (currentSegmentIdx >= (int)prog->segments.size()) {
-        appState.status.currentState = KilnState::DONE;
+        appState.status_.currentState = KilnState::DONE;
         return;
     }
 
     FiringSegment& seg = prog->segments[currentSegmentIdx];
     float setpoint = segmentStartTemp;
 
-    if (appState.status.currentState == KilnState::RAMPING ||
-        appState.status.currentState == KilnState::COOLING) {
+    if (appState.status_.currentState == KilnState::RAMPING ||
+        appState.status_.currentState == KilnState::COOLING) {
         if (seg.rampRate <= 0.f) {
-            appState.status.currentState = KilnState::SOAKING;
+            appState.status_.currentState = KilnState::SOAKING;
             segmentStartMs               = now;
             setpoint                     = seg.targetTemperature;
             applyTelemetryAndPid(now, setpoint);
@@ -215,31 +223,31 @@ void FiringController::processSegment(uint32_t now) {
             setpoint = segmentStartTemp + tempChange;
             if (setpoint >= seg.targetTemperature) {
                 setpoint                     = seg.targetTemperature;
-                appState.status.currentState = KilnState::SOAKING;
+                appState.status_.currentState = KilnState::SOAKING;
                 segmentStartMs               = now;
             }
         } else if (segmentStartTemp > seg.targetTemperature) {
             setpoint = segmentStartTemp - tempChange;
             if (setpoint <= seg.targetTemperature) {
                 setpoint                     = seg.targetTemperature;
-                appState.status.currentState = KilnState::SOAKING;
+                appState.status_.currentState = KilnState::SOAKING;
                 segmentStartMs               = now;
             }
         } else {
             setpoint                     = seg.targetTemperature;
-            appState.status.currentState = KilnState::SOAKING;
+            appState.status_.currentState = KilnState::SOAKING;
             segmentStartMs               = now;
         }
-    } else if (appState.status.currentState == KilnState::SOAKING) {
+    } else if (appState.status_.currentState == KilnState::SOAKING) {
         setpoint                 = seg.targetTemperature;
-        const float  cur       = appState.status.currentTemperature;
+        const float  cur       = appState.status_.currentTemperature;
         const uint32_t soakMins = (now - segmentStartMs) / kMsPerMinute;
         const bool soakDoneByTemp =
             seg.soakTime > 0 && cur >= seg.targetTemperature;
         if (soakDoneByTemp || soakMins >= seg.soakTime) {
             currentSegmentIdx++;
             if (currentSegmentIdx >= (int)prog->segments.size()) {
-                appState.status.currentState = KilnState::DONE;
+                appState.status_.currentState = KilnState::DONE;
                 return;
             }
             // currentSegmentIdx is in range: 0 <= idx < segments.size() (just checked).
@@ -248,21 +256,21 @@ void FiringController::processSegment(uint32_t now) {
             // Schedule anchor: completed segment's target (not measured temp), so a
             // lagging kiln does not stretch the overall profile.
             segmentStartTemp = seg.targetTemperature;
-            appState.status.segmentTimeElapsed = 0;
+            appState.status_.segmentTimeElapsed = 0;
 
             if (newSeg.rampRate > 0.f) {
                 if (segmentStartTemp < newSeg.targetTemperature) {
-                    appState.status.currentState = KilnState::RAMPING;
+                    appState.status_.currentState = KilnState::RAMPING;
                     setpoint                     = segmentStartTemp;
                 } else if (segmentStartTemp > newSeg.targetTemperature) {
-                    appState.status.currentState = KilnState::COOLING;
+                    appState.status_.currentState = KilnState::COOLING;
                     setpoint                     = segmentStartTemp;
                 } else {
-                    appState.status.currentState = KilnState::SOAKING;
+                    appState.status_.currentState = KilnState::SOAKING;
                     setpoint                     = newSeg.targetTemperature;
                 }
             } else {
-                appState.status.currentState = KilnState::SOAKING;
+                appState.status_.currentState = KilnState::SOAKING;
                 setpoint                     = newSeg.targetTemperature;
             }
             applyTelemetryAndPid(now, setpoint);
@@ -305,5 +313,6 @@ void FiringController::updatePID(float setpoint, float currentTemp, uint32_t now
 
     powerOutput->setPower(output / 100.f);
 
-    lastTemp = currentTemp;
+    lastTemp               = currentTemp;
+    appState.status_.power = output / 100.f;
 }

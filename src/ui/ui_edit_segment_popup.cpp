@@ -27,8 +27,10 @@ static void on_save(lv_event_t *e) {
     float targetDisplay = atof(lv_textarea_get_text(ctx->ta_target));
     float rateDisplay   = atof(lv_textarea_get_text(ctx->ta_rate));
 
-    float targetC = fromDisplayTemp(targetDisplay, appState.tempUnit);
-    float rateC   = fromDisplayRate(rateDisplay,   appState.tempUnit);
+    const TempUnit tu = appState.getTempUnit();
+
+    float targetC = fromDisplayTemp(targetDisplay, tu);
+    float rateC   = fromDisplayRate(rateDisplay, tu);
 
     bool targetOk = targetC >= 1.0f && targetC <= 1400.0f;
     bool rateOk   = rateC   >= 1.0f && rateC   <= 999.0f;
@@ -46,12 +48,17 @@ static void on_save(lv_event_t *e) {
     const char* soakText = lv_textarea_get_text(ctx->ta_soak);
     tempSeg.soakTime = (soakText && soakText[0] != '\0') ? atoi(soakText) : 0;
 
-    auto& segs = appState.customPrograms[ctx->prog_idx].segments;
+    FiringProgram cp{};
+    if (!appState.tryCopyCustomProgram(static_cast<size_t>(ctx->prog_idx), &cp))
+        return;
     if (ctx->seg_idx == -1) {
-        segs.push_back(tempSeg);
+        cp.segments.push_back(tempSeg);
     } else {
-        segs[ctx->seg_idx] = tempSeg;
+        if (ctx->seg_idx < 0 || static_cast<size_t>(ctx->seg_idx) >= cp.segments.size())
+            return;
+        cp.segments[static_cast<size_t>(ctx->seg_idx)] = tempSeg;
     }
+    appState.replaceCustomProgram(static_cast<size_t>(ctx->prog_idx), std::move(cp));
 
     if (ctx->refresh_cb) ctx->refresh_cb();
     lv_obj_del(ctx->popup);
@@ -62,8 +69,7 @@ static void on_delete(lv_event_t *e) {
     PopupContext *ctx = (PopupContext *)lv_event_get_user_data(e);
     
     if (ctx->seg_idx != -1) {
-        auto& segs = appState.customPrograms[ctx->prog_idx].segments;
-        segs.erase(segs.begin() + ctx->seg_idx);
+        appState.eraseCustomSegment(static_cast<size_t>(ctx->prog_idx), static_cast<size_t>(ctx->seg_idx));
     }
 
     if (ctx->refresh_cb) ctx->refresh_cb();
@@ -72,7 +78,17 @@ static void on_delete(lv_event_t *e) {
 }
 
 void ui_edit_segment_popup_create(lv_obj_t *parent, int prog_idx, int seg_idx, RefreshListCb refresh_cb) {
-    if (prog_idx < 0 || prog_idx >= appState.customPrograms.size()) return;
+    if (prog_idx < 0 || static_cast<size_t>(prog_idx) >= appState.getCustomProgramCount())
+        return;
+
+    FiringProgram pg{};
+    if (!appState.tryCopyCustomProgram(static_cast<size_t>(prog_idx), &pg))
+        return;
+    if (seg_idx != -1 &&
+        (seg_idx < 0 || static_cast<size_t>(seg_idx) >= pg.segments.size()))
+        return;
+
+    const TempUnit dispUnit = appState.getTempUnit();
     
     // Create an overlay to act as a modal backdrop and center the popup
     lv_obj_t *overlay = lv_obj_create(parent);
@@ -162,9 +178,10 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, int prog_idx, int seg_idx, R
     ctx->ta_target = lv_textarea_create(cont_inputs);
     lv_textarea_set_one_line(ctx->ta_target, true);
     lv_obj_set_height(ctx->ta_target, LV_SIZE_CONTENT);
-    lv_textarea_set_placeholder_text(ctx->ta_target, unitSymbol(appState.tempUnit));
+    lv_textarea_set_placeholder_text(ctx->ta_target, unitSymbol(dispUnit));
     if (seg_idx != -1) {
-        float dispVal = toDisplayTemp(appState.customPrograms[prog_idx].segments[seg_idx].targetTemperature, appState.tempUnit);
+        float dispVal =
+            toDisplayTemp(pg.segments[static_cast<size_t>(seg_idx)].targetTemperature, dispUnit);
         snprintf(buf, sizeof(buf), "%.0f", dispVal);
         lv_textarea_set_text(ctx->ta_target, buf);
     } else {
@@ -182,10 +199,10 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, int prog_idx, int seg_idx, R
     lv_textarea_set_one_line(ctx->ta_rate, true);
     lv_obj_set_height(ctx->ta_rate, LV_SIZE_CONTENT);
     char rate_placeholder[8];
-    snprintf(rate_placeholder, sizeof(rate_placeholder), "%s/h", unitSymbol(appState.tempUnit));
+    snprintf(rate_placeholder, sizeof(rate_placeholder), "%s/h", unitSymbol(dispUnit));
     lv_textarea_set_placeholder_text(ctx->ta_rate, rate_placeholder);
     if (seg_idx != -1) {
-        float dispVal = toDisplayRate(appState.customPrograms[prog_idx].segments[seg_idx].rampRate, appState.tempUnit);
+        float dispVal = toDisplayRate(pg.segments[static_cast<size_t>(seg_idx)].rampRate, dispUnit);
         snprintf(buf, sizeof(buf), "%.0f", dispVal);
         lv_textarea_set_text(ctx->ta_rate, buf);
     } else {
@@ -203,8 +220,8 @@ void ui_edit_segment_popup_create(lv_obj_t *parent, int prog_idx, int seg_idx, R
     lv_textarea_set_one_line(ctx->ta_soak, true);
     lv_obj_set_height(ctx->ta_soak, LV_SIZE_CONTENT);
     lv_textarea_set_placeholder_text(ctx->ta_soak, "min");
-    if (seg_idx != -1 && appState.customPrograms[prog_idx].segments[seg_idx].soakTime > 0) {
-        snprintf(buf, sizeof(buf), "%d", appState.customPrograms[prog_idx].segments[seg_idx].soakTime);
+    if (seg_idx != -1 && pg.segments[static_cast<size_t>(seg_idx)].soakTime > 0) {
+        snprintf(buf, sizeof(buf), "%d", (int)pg.segments[static_cast<size_t>(seg_idx)].soakTime);
         lv_textarea_set_text(ctx->ta_soak, buf);
     } else {
         lv_textarea_set_text(ctx->ta_soak, "");

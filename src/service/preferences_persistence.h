@@ -12,8 +12,8 @@ private:
     const char* NVS_SETTINGS_NAMESPACE = "kiln_cfg";
 
 public:
-    bool loadCustomPrograms(std::vector<FiringProgram>& programs) override;
-    bool saveCustomPrograms(const std::vector<FiringProgram>& programs) override;
+    bool loadCustomPrograms() override;
+    bool saveCustomPrograms() override;
 
     bool loadSettings();
     bool saveSettings();
