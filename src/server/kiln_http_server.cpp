@@ -1,9 +1,14 @@
 #include "kiln_http_server.h"
 #include "kiln_dashboard_json.h"
 #include "kiln_chart_trace.h"
+#include "kiln_programs_api.h"
 #include "kiln_web_assets.h"
 #include "kiln_wifi.h"
 
+#include "../model/app_state.h"
+#include "../model/kiln_status.h"
+
+#include <ArduinoJson.h>
 #include <WebServer.h>
 #include <Arduino.h>
 #include <cstring>
@@ -171,6 +176,67 @@ static void handle_api_chart_trace() {
     http_log_response(200, json.length());
 }
 
+static void handle_api_control_tap() {
+    http_req_begin();
+    appState.applyStartStopTap();
+    String json;
+    JsonDocument doc;
+    doc["ok"]        = true;
+    doc["kilnState"] = kilnStateJsonKey(appState.getStatus().currentState);
+    serializeJson(doc, json);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", json);
+    http_log_response(200, json.length());
+}
+
+static void handle_api_programs_get() {
+    http_req_begin();
+    String json;
+    kiln_programs_serialize_json(json);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", json);
+    http_log_response(200, json.length());
+}
+
+static void handle_api_programs_save() {
+    http_req_begin();
+    String err;
+    const String body = server.arg("plain");
+    if (!kiln_programs_apply_save_json(body, err)) {
+        const int code = err.indexOf("locked") >= 0 ? 403 : 400;
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(code, "application/json", err);
+        http_log_response(code, err.length());
+        return;
+    }
+    const char ok[] = "{\"ok\":true}";
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", ok);
+    http_log_response(200, sizeof(ok) - 1);
+}
+
+static void handle_api_programs_swap() {
+    http_req_begin();
+    if (!kiln_programs_selection_edit_allowed()) {
+        const char err[] = "{\"error\":\"program locked while firing\"}";
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(403, "application/json", err);
+        http_log_response(403, sizeof(err) - 1);
+        return;
+    }
+    if (!appState.swapProgramSelectionWithPrevious()) {
+        const char err[] = "{\"error\":\"swap unavailable\"}";
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(403, "application/json", err);
+        http_log_response(403, sizeof(err) - 1);
+        return;
+    }
+    const char ok[] = "{\"ok\":true}";
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", ok);
+    http_log_response(200, sizeof(ok) - 1);
+}
+
 static void handle_not_found() {
     http_req_begin();
     const char msg[] = "Not found";
@@ -186,6 +252,10 @@ static void register_routes() {
     server.on("/app.js", HTTP_GET, handle_app);
     server.on("/api/status", HTTP_GET, handle_api_status);
     server.on("/api/chart/trace", HTTP_GET, handle_api_chart_trace);
+    server.on("/api/control/tap", HTTP_POST, handle_api_control_tap);
+    server.on("/api/programs", HTTP_GET, handle_api_programs_get);
+    server.on("/api/programs/save", HTTP_POST, handle_api_programs_save);
+    server.on("/api/programs/swap-previous", HTTP_POST, handle_api_programs_swap);
     server.onNotFound(handle_not_found);
     s_routes_registered = true;
 }

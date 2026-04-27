@@ -85,7 +85,7 @@ static void btn_config_event_cb(lv_event_t * e) {
 static void btn_go_back_event_cb(lv_event_t * e) {
     if (lv_event_get_code(e) != LV_EVENT_CLICKED)
         return;
-    program_selection_swap_with_previous();
+    appState.swapProgramSelectionWithPrevious();
     ui_main_screen_update();
 }
 
@@ -510,7 +510,8 @@ void ui_main_screen_update() {
         const KilnState navState = tv.status.currentState;
         const bool progPickEnabled =
             (navState == KilnState::IDLE || navState == KilnState::ERROR);
-        const bool prevOk = g_previous_program_selection.valid;
+        const bool prevOk =
+            g_previous_program_index.valid && navState == KilnState::IDLE;
         if (progPickEnabled && prevOk)
             lv_obj_clear_state(btn_go_back, LV_STATE_DISABLED);
         else

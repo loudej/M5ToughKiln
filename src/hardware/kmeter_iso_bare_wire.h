@@ -9,14 +9,12 @@
 
 // Minimal driver for the M5Stack KMeter ISO Unit (MAX31855KASA-based, 0x66).
 //
-// Why hand-rolled instead of M5Unit-METER:
-//   The ESP32 Arduino Wire driver mis-reports `endTransmission()` as `err=2`
-//   (NACK on address) whenever the slave clock-stretches — even when the bytes
-//   were transferred successfully. The KMeter ISO's STM32 firmware stretches
-//   on every register write, so off-the-shelf drivers that gate on the
-//   endTransmission return value reject every transaction. We treat that
-//   return as advisory; success is judged by `requestFrom` returning the
-//   expected byte count.
+// `endTransmission()==2` is `I2C_ERROR_ACK` on the write phase (register select). On this
+// unit it often coincides with clock stretching, but field experience shows it is also a
+// reliable signal of a stuck slave, failed register latch, or marginal bus — i.e. data
+// from `requestFrom` may be stale even when the byte count matches. We therefore treat
+// persisting err=2 as a failed read for control/UI (return false), run bus recovery
+// (9-clock reset + slow Wire), and escalate to Port A power cycle on Core2/Tough when needed.
 //
 // Register map (from M5Stack's official I2C protocol document):
 //   0x00 4B  TEMPERATURE_CELSIUS         int32 LE  * 0.01 °C  (thermocouple)
@@ -66,13 +64,29 @@ public:
     void pollRegisters(KilnSensorRead& out);
 
 private:
-    TwoWire& _wire;
-    uint8_t  _addr;
-    bool     _initialized = false;
+    TwoWire&   _wire;
+    uint8_t    _addr;
+    bool       _initialized = false;
+    int8_t     _pinSda      = -1;
+    int8_t     _pinScl      = -1;
+    uint32_t   _clockHz     = 100000U;
+    /// Last successful Port A power-cycle time (`millis()`); per-instance rate limit for last resort.
+    uint32_t   _lastBusPowerCycleMs = 0;
 
-    // Common path: write `reg`, then read `n` bytes. Returns true iff the
-    // requested number of bytes was actually delivered. The `endTransmission`
-    // return code is intentionally ignored (see header comment).
+    /// Repeated empty write + `endTransmission` until slave ACKs (same probe as `begin()`).
+    bool probeUntilAck(unsigned retries, uint32_t gapMs);
+
+    /// Bit-bang 9 SCL pulses + STOP to release a stuck slave; then `Wire` is re-inited at `kRecoveryClockHz`.
+    bool recoverFromWritePhaseNack();
+
+    /// Core2/Tough: cycle AXP192 Port A bus power via `setExtOutput`, settle, probe ACK, `Wire` @ `kRecoveryClockHz`.
+    /// Rate-limited; returns false if unsupported board or too soon since last cycle.
+    bool lastResortPortBusPowerCycle();
+
+    // Single write-reg + read-n-bytes attempt. On short read, fills up to 8 bytes into `partialOut`.
+    bool tryReadRegisterOnce(uint8_t reg, uint8_t* out, size_t n, uint8_t* txErrOut, size_t* gotOut,
+                             uint8_t partialOut[8], unsigned* partialCountOut);
+
     bool readRegister(uint8_t reg, uint8_t* out, size_t n);
 
     bool readInt32LE(uint8_t reg, int32_t& value);

@@ -18,7 +18,12 @@ const char KILN_WEB_INDEX_HTML[] = R"--HTML--(
     <table class="status-table">
       <tr>
         <th scope="row">Program</th>
-        <td colspan="3" class="strong" id="programName"></td>
+        <td colspan="3">
+          <div class="program-row-btn">
+            <button type="button" id="btnProgOpen" class="prog-open-btn"></button>
+            <button type="button" id="btnProgSwap" class="prog-swap-btn" title="Swap with previous program slot"><svg class="prog-swap-ic" viewBox="0 0 24 24" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M17 1l4 4-4 4"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M3 11V9a4 4 0 014-4h14"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M7 23l-4-4 4-4"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M21 13v2a4 4 0 01-4 4H3"/></svg></button>
+          </div>
+        </td>
       </tr>
       <tr>
         <th scope="row">Temp</th>
@@ -53,8 +58,41 @@ const char KILN_WEB_INDEX_HTML[] = R"--HTML--(
       <svg id="chartSvg" class="chart-svg" viewBox="0 0 400 180" preserveAspectRatio="xMidYMid meet"></svg>
     </section>
 
-    <p class="fine">Read-only dashboard (polls controller state).</p>
+    <div class="ctrl-row">
+      <button type="button" id="ctrlTap" class="ctrl-btn ctrl-start">START</button>
+    </div>
   </main>
+
+  <div id="progBackdrop" class="prog-backdrop hidden"></div>
+  <div id="progPanel" class="prog-panel hidden" role="dialog" aria-modal="true">
+    <div class="prog-panel-inner">
+      <button type="button" id="progClose" class="prog-close-btn" aria-label="Close">&times;</button>
+      <h2 class="prog-panel-title">Programs</h2>
+
+      <label class="prog-field"><span class="prog-lbl">Program</span>
+        <select id="progSelect"></select>
+      </label>
+
+      <div id="progPredefinedWrap">
+        <label class="prog-field"><span class="prog-lbl">Cone</span>
+          <input id="progCone" type="text" autocomplete="off" maxlength="12"/>
+        </label>
+        <label class="prog-field"><span class="prog-lbl">Candle (min)</span>
+          <input id="progCandle" type="number" step="1"/>
+        </label>
+        <label class="prog-field"><span class="prog-lbl">Soak (min)</span>
+          <input id="progSoak" type="number" step="1"/>
+        </label>
+      </div>
+
+      <div id="progCustomWrap" class="hidden">
+        <div class="prog-muted">Segments (read-only)</div>
+        <div id="progCustomSegments" class="prog-seg-list"></div>
+      </div>
+
+      <button type="button" id="progApply" class="prog-apply-btn">Apply</button>
+    </div>
+  </div>
   <script defer src="/app.js"></script>
 </body>
 </html>
@@ -195,6 +233,174 @@ body {
 .good { color:#4ade80; }
 .bad { color:#f87171; }
 .norm { color:var(--txt); }
+
+.ctrl-row {
+  margin-top:16px;
+}
+.ctrl-btn {
+  width:100%;
+  border:none;
+  border-radius:10px;
+  padding:14px 18px;
+  font-size:1.05rem;
+  font-weight:650;
+  letter-spacing:.04em;
+  cursor:pointer;
+  color:#f8fafc;
+  font-family:inherit;
+}
+.ctrl-btn:disabled {
+  opacity:0.55;
+  cursor:not-allowed;
+}
+.ctrl-start { background:#16a34a; }
+.ctrl-stop { background:#dc2626; }
+.ctrl-done { background:#475569; }
+.ctrl-reset { background:#b91c1c; }
+
+.hidden { display:none !important; }
+
+.program-row-btn {
+  display:flex;
+  gap:8px;
+  align-items:stretch;
+  width:100%;
+}
+.prog-open-btn {
+  flex:1;
+  text-align:left;
+  border:1px solid #3b4a5c;
+  border-radius:8px;
+  background:#0f1318;
+  color:var(--txt);
+  font-size:1rem;
+  font-weight:550;
+  padding:8px 10px;
+  cursor:pointer;
+  font-family:inherit;
+  min-width:0;
+}
+.prog-swap-btn {
+  flex:0 0 48px;
+  border:1px solid #3b4a5c;
+  border-radius:8px;
+  background:#0f1318;
+  color:var(--txt);
+  cursor:pointer;
+  font-family:inherit;
+  padding:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+.prog-swap-ic {
+  width:22px;
+  height:22px;
+  display:block;
+}
+.prog-open-btn:disabled {
+  opacity:0.45;
+  cursor:not-allowed;
+}
+
+.prog-swap-btn:disabled {
+  opacity:0.45;
+  cursor:not-allowed;
+}
+
+.prog-backdrop {
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.55);
+  z-index:100;
+}
+.prog-panel {
+  position:fixed;
+  z-index:101;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  width:min(480px, 100% - 32px);
+  max-height:min(90vh, 640px);
+  overflow:auto;
+  background:var(--panel);
+  border:1px solid #374151;
+  border-radius:12px;
+  box-shadow:0 16px 40px rgba(0,0,0,0.45);
+}
+.prog-panel-inner {
+  padding:18px;
+  position:relative;
+}
+.prog-close-btn {
+  position:absolute;
+  top:10px;
+  right:12px;
+  border:none;
+  background:none;
+  color:var(--muted);
+  font-size:1.6rem;
+  line-height:1;
+  cursor:pointer;
+  padding:4px 8px;
+}
+.prog-panel-title {
+  margin:0 0 14px;
+  font-size:1.15rem;
+  font-weight:650;
+}
+.prog-field {
+  display:flex;
+  flex-direction:column;
+  gap:4px;
+  margin-bottom:12px;
+}
+.prog-field .prog-lbl {
+  font-size:.78rem;
+  color:var(--muted);
+  text-transform:uppercase;
+  letter-spacing:.05em;
+}
+.prog-field input,
+.prog-field select {
+  border:1px solid #374151;
+  border-radius:6px;
+  background:#101218;
+  color:var(--txt);
+  padding:8px 10px;
+  font-size:.95rem;
+  font-family:inherit;
+}
+.prog-muted {
+  font-size:.82rem;
+  color:var(--muted);
+  margin-bottom:8px;
+}
+.prog-seg-list {
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+.prog-seg-row {
+  font-size:.88rem;
+  padding:8px 10px;
+  border-radius:6px;
+  background:#101218;
+  border:1px solid #2d3748;
+}
+.prog-apply-btn {
+  width:100%;
+  margin-top:14px;
+  padding:12px;
+  border:none;
+  border-radius:8px;
+  background:#2563eb;
+  color:#fff;
+  font-weight:650;
+  cursor:pointer;
+  font-size:1rem;
+}
+.prog-apply-btn:hover { filter:brightness(1.06); }
 )--CSS--";
 
 const char KILN_WEB_APP_JS[] = R"--JS--(
@@ -210,6 +416,221 @@ let traceSince = 0;
 let statusPollBusy = false;
 let tracePollBusy = false;
 let traceChain = Promise.resolve();
+let tapBusy = false;
+let programsData = null;
+
+function programSelectionLocked(j) {
+  const ks = (j && j.kilnState) ? j.kilnState : 'idle';
+  return ks !== 'idle' && ks !== 'error';
+}
+
+function updateProgramRow(j) {
+  const o = document.getElementById('btnProgOpen');
+  const sw = document.getElementById('btnProgSwap');
+  if (o) o.textContent = j.programName || '';
+  const ks = (j && j.kilnState) ? j.kilnState : 'idle';
+  const locked = ks !== 'idle' && ks !== 'error';
+  if (o) o.disabled = locked;
+  if (sw) sw.disabled = locked || !j.previousSelectionValid || ks !== 'idle';
+}
+
+async function fetchProgramsJson() {
+  const r = await fetch('/api/programs', { cache: 'no-store' });
+  programsData = await r.json();
+  return programsData;
+}
+
+function fillProgSelect() {
+  const sel = document.getElementById('progSelect');
+  if (!sel || !programsData) return;
+  sel.innerHTML = '';
+  const pre = programsData.predefined || [];
+  for (let i = 0; i < pre.length; i++) {
+    const p = pre[i];
+    const opt = document.createElement('option');
+    opt.value = String(p.slot);
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+  const cust = programsData.custom || [];
+  for (let i = 0; i < cust.length; i++) {
+    const p = cust[i];
+    const opt = document.createElement('option');
+    opt.value = String(4 + p.index);
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+}
+
+function fmtSegNum(x) {
+  if (typeof x !== 'number' || !isFinite(x)) return '--';
+  return String(Math.round(x * 10) / 10);
+}
+
+function renderCustomSegments(customIdx) {
+  const box = document.getElementById('progCustomSegments');
+  const tu = (programsData && programsData.tempUnit) ? programsData.tempUnit : '';
+  box.innerHTML = '';
+  const custList = programsData ? programsData.custom : [];
+  let cust = null;
+  for (let i = 0; i < custList.length; i++) {
+    if (custList[i].index === customIdx) {
+      cust = custList[i];
+      break;
+    }
+  }
+  if (!cust || !cust.segments || !cust.segments.length) {
+    box.textContent = '(no segments)';
+    return;
+  }
+  for (let i = 0; i < cust.segments.length; i++) {
+    const s = cust.segments[i];
+    const row = document.createElement('div');
+    row.className = 'prog-seg-row mono';
+    row.textContent =
+      '#' +
+      (i + 1) +
+      '  ' +
+      fmtSegNum(s.target) +
+      '\xb0' +
+      tu +
+      '  \xb7  ' +
+      fmtSegNum(s.rate) +
+      '\xb0' +
+      tu +
+      '/h  \xb7  soak ' +
+      s.soakMin +
+      ' min';
+    box.appendChild(row);
+  }
+}
+
+function syncFieldsFromProgSelect() {
+  const sel = document.getElementById('progSelect');
+  const preWrap = document.getElementById('progPredefinedWrap');
+  const custWrap = document.getElementById('progCustomWrap');
+  if (!sel || !programsData) return;
+  const idx = parseInt(sel.value, 10);
+  if (idx <= 3) {
+    preWrap.classList.remove('hidden');
+    custWrap.classList.add('hidden');
+    const pre = programsData.predefined[idx];
+    const coneEl = document.getElementById('progCone');
+    const cdEl = document.getElementById('progCandle');
+    const skEl = document.getElementById('progSoak');
+    if (coneEl) coneEl.value = pre && pre.cone != null ? String(pre.cone) : '';
+    if (cdEl) cdEl.value = pre && pre.candle ? String(pre.candle) : '';
+    if (skEl) skEl.value = pre && pre.soak ? String(pre.soak) : '';
+  } else {
+    preWrap.classList.add('hidden');
+    custWrap.classList.remove('hidden');
+    renderCustomSegments(idx - 4);
+  }
+}
+
+async function openProgPanel() {
+  if (lastStatus && programSelectionLocked(lastStatus)) return;
+  await fetchProgramsJson();
+  fillProgSelect();
+  const sel = document.getElementById('progSelect');
+  const ai = programsData.activeIndex;
+  sel.value = String(ai);
+  syncFieldsFromProgSelect();
+  document.getElementById('progBackdrop').classList.remove('hidden');
+  document.getElementById('progPanel').classList.remove('hidden');
+}
+
+function closeProgPanel() {
+  const b = document.getElementById('progBackdrop');
+  const p = document.getElementById('progPanel');
+  if (b) b.classList.add('hidden');
+  if (p) p.classList.add('hidden');
+}
+
+async function applyProgPanel() {
+  const sel = document.getElementById('progSelect');
+  const ai = parseInt(sel.value, 10);
+  const payload = { activeIndex: ai };
+  if (ai <= 3) {
+    payload.cone = document.getElementById('progCone').value.trim();
+    const cRaw = document.getElementById('progCandle').value.trim();
+    const sRaw = document.getElementById('progSoak').value.trim();
+    payload.candle = cRaw === '' ? 0 : parseInt(cRaw, 10);
+    payload.soak = sRaw === '' ? 0 : parseInt(sRaw, 10);
+  }
+  const r = await fetch('/api/programs/save', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!r.ok) {
+    console.warn('programs save failed');
+    return;
+  }
+  closeProgPanel();
+  await poll();
+}
+
+async function swapProgPrevious() {
+  const sw = document.getElementById('btnProgSwap');
+  if (!sw || sw.disabled) return;
+  if (lastStatus && programSelectionLocked(lastStatus)) return;
+  await fetch('/api/programs/swap-previous', { method: 'POST', cache: 'no-store' });
+  await poll();
+}
+
+function ctrlLabelForKilnState(ks) {
+  if (!ks) return 'START';
+  switch (ks) {
+    case 'idle': return 'START';
+    case 'ramping':
+    case 'soaking':
+    case 'cooling': return 'STOP';
+    case 'done': return 'DONE';
+    case 'error': return 'RESET';
+    default: return 'START';
+  }
+}
+
+function ctrlClassForKilnState(ks) {
+  if (!ks || ks === 'idle') return 'ctrl-start';
+  if (ks === 'ramping' || ks === 'soaking' || ks === 'cooling') return 'ctrl-stop';
+  if (ks === 'done') return 'ctrl-done';
+  if (ks === 'error') return 'ctrl-reset';
+  return 'ctrl-start';
+}
+
+function updateCtrlButton(j) {
+  const btn = document.getElementById('ctrlTap');
+  if (!btn) return;
+  const ks = (j && j.kilnState) ? j.kilnState : 'idle';
+  btn.textContent = ctrlLabelForKilnState(ks);
+  btn.className = 'ctrl-btn ' + ctrlClassForKilnState(ks);
+}
+
+async function onCtrlTap() {
+  if (tapBusy) return;
+  tapBusy = true;
+  const btn = document.getElementById('ctrlTap');
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/api/control/tap', { method: 'POST', cache: 'no-store' });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.kilnState) {
+        if (!lastStatus) lastStatus = {};
+        lastStatus.kilnState = j.kilnState;
+        updateCtrlButton(lastStatus);
+      }
+    }
+    await poll();
+  } catch (e) {
+    console.warn(e);
+  } finally {
+    tapBusy = false;
+    if (btn) btn.disabled = false;
+  }
+}
 
 function applyTraceJson(tj) {
   if (tj.resync) {
@@ -380,8 +801,13 @@ async function poll() {
     const j = await r.json();
     lastStatus = j;
 
+    updateCtrlButton(j);
+
+    updateProgramRow(j);
+
+    if (programSelectionLocked(j)) closeProgPanel();
+
     document.getElementById('hdrUnit').textContent = j.tempUnit ? ('°' + j.tempUnit) : '';
-    document.getElementById('programName').textContent = j.programName || '';
     document.getElementById('temperature').textContent = j.temperature || '';
 
     const st = document.getElementById('statusLine');
@@ -432,6 +858,26 @@ poll();
 pollTrace();
 setInterval(poll, 500);
 setInterval(pollTrace, 750);
+
+(function () {
+  const btn = document.getElementById('ctrlTap');
+  if (btn) btn.addEventListener('click', onCtrlTap);
+})();
+
+(function () {
+  const openBtn = document.getElementById('btnProgOpen');
+  if (openBtn) openBtn.addEventListener('click', openProgPanel);
+  const swapBtn = document.getElementById('btnProgSwap');
+  if (swapBtn) swapBtn.addEventListener('click', swapProgPrevious);
+  const bd = document.getElementById('progBackdrop');
+  if (bd) bd.addEventListener('click', closeProgPanel);
+  const cls = document.getElementById('progClose');
+  if (cls) cls.addEventListener('click', closeProgPanel);
+  const ap = document.getElementById('progApply');
+  if (ap) ap.addEventListener('click', applyProgPanel);
+  const sel = document.getElementById('progSelect');
+  if (sel) sel.addEventListener('change', syncFieldsFromProgSelect);
+})();
 )--JS--";
 
 const size_t KILN_WEB_INDEX_HTML_LEN = sizeof(KILN_WEB_INDEX_HTML) - 1;

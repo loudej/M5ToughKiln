@@ -84,6 +84,7 @@ void FiringController::update() {
         appState.status_.programPeakTemperatureC     = 0.f;
         appState.status_.programRunStartTemperatureC = 0.f;
         powerOutput->setEnabled(false);
+        appState.status_.power = 0.f;
         segmentStartMs    = 0;
         programStartMs    = 0;
         currentSegmentIdx = 0;

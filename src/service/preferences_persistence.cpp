@@ -8,92 +8,18 @@
 namespace {
 
 void load_previous_snapshot(Preferences& prefs) {
-    ProgramSelectionSnapshot s;
-    s.valid = prefs.getUInt("pv_valid", 0) != 0;
-    if (!s.valid) {
-        g_previous_program_selection = s;
+    g_previous_program_index.valid = prefs.getUInt("pv_valid", 0) != 0;
+    if (!g_previous_program_index.valid)
         return;
-    }
-    s.activeProgramIndex = prefs.getInt("pv_act", 0);
-
-    for (int i = 0; i < 4; ++i) {
-        char key[20];
-        sprintf(key, "pv_pre%d_cone", i);
-        s.preCone[i] = prefs.getString(key, "").c_str();
-        sprintf(key, "pv_pre%d_candle", i);
-        s.preCandle[i] = prefs.getInt(key, 0);
-        sprintf(key, "pv_pre%d_soak", i);
-        s.preSoak[i] = prefs.getInt(key, 0);
-    }
-
-    s.hasCustomSlot = prefs.getUInt("pv_has_custom", 0) != 0;
-    s.customIndex   = prefs.getInt("pv_custom_idx", 0);
-
-    if (s.hasCustomSlot) {
-        FiringProgram& cp = s.customCopy;
-        cp.name      = prefs.getString("pv_c_name", "").c_str();
-        cp.isCustom  = prefs.getUInt("pv_c_iscustom", 1) != 0;
-        cp.origCone  = prefs.getString("pv_c_ocone", "").c_str();
-        cp.origCandle = prefs.getInt("pv_c_ocandle", 0);
-        cp.origSoak   = prefs.getInt("pv_c_osoak", 0);
-
-        cp.segments.clear();
-        int segCount = prefs.getInt("pv_c_seg_cnt", 0);
-        char segKey[20];
-        for (int j = 0; j < segCount; j++) {
-            FiringSegment seg;
-            sprintf(segKey, "pv_c_s%d_tt", j);
-            seg.targetTemperature = prefs.getFloat(segKey, 0);
-            sprintf(segKey, "pv_c_s%d_rr", j);
-            seg.rampRate = prefs.getFloat(segKey, 0);
-            sprintf(segKey, "pv_c_s%d_st", j);
-            seg.soakTime = prefs.getUInt(segKey, 0);
-            cp.segments.push_back(seg);
-        }
-    }
-
-    g_previous_program_selection = s;
+    g_previous_program_index.programIndex = prefs.getInt("pv_act", 0);
 }
 
 void save_previous_snapshot(Preferences& prefs) {
-    const ProgramSelectionSnapshot& sp = g_previous_program_selection;
-    prefs.putUInt("pv_valid", sp.valid ? 1u : 0u);
-    if (!sp.valid)
+    prefs.putUInt("pv_valid", g_previous_program_index.valid ? 1u : 0u);
+    if (!g_previous_program_index.valid)
         return;
 
-    prefs.putInt("pv_act", sp.activeProgramIndex);
-
-    for (int i = 0; i < 4; ++i) {
-        char key[20];
-        sprintf(key, "pv_pre%d_cone", i);
-        prefs.putString(key, sp.preCone[i].c_str());
-        sprintf(key, "pv_pre%d_candle", i);
-        prefs.putInt(key, sp.preCandle[i]);
-        sprintf(key, "pv_pre%d_soak", i);
-        prefs.putInt(key, sp.preSoak[i]);
-    }
-
-    prefs.putUInt("pv_has_custom", sp.hasCustomSlot ? 1u : 0u);
-    prefs.putInt("pv_custom_idx", sp.customIndex);
-
-    const FiringProgram& cp = sp.customCopy;
-    prefs.putString("pv_c_name", cp.name.c_str());
-    prefs.putUInt("pv_c_iscustom", cp.isCustom ? 1u : 0u);
-    prefs.putString("pv_c_ocone", cp.origCone.c_str());
-    prefs.putInt("pv_c_ocandle", cp.origCandle);
-    prefs.putInt("pv_c_osoak", cp.origSoak);
-    prefs.putInt("pv_c_seg_cnt", cp.segments.size());
-
-    for (size_t j = 0; j < cp.segments.size(); j++) {
-        const FiringSegment& seg = cp.segments[j];
-        char key[20];
-        sprintf(key, "pv_c_s%u_tt", (unsigned)j);
-        prefs.putFloat(key, seg.targetTemperature);
-        sprintf(key, "pv_c_s%u_rr", (unsigned)j);
-        prefs.putFloat(key, seg.rampRate);
-        sprintf(key, "pv_c_s%u_st", (unsigned)j);
-        prefs.putUInt(key, seg.soakTime);
-    }
+    prefs.putInt("pv_act", g_previous_program_index.programIndex);
 }
 
 } // namespace

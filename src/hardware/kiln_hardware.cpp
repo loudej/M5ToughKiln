@@ -53,6 +53,7 @@ const KilnSensorRead& KMeterISOHardware::readSensor() {
     }
 
     kmeter.pollRegisters(lastRead);
+    // Liveness for UI / JSON: false when status read fails (pollRegisters bails early).
     lastRead.communicationOk = lastRead.statusRegisterValid;
 
     if (lastRead.controlUsable()) {

@@ -1,9 +1,12 @@
 #include "app_state.h"
 #include "program_selection_snapshot.h"
 #include "profile_generator.h"
+#include "../service/preferences_persistence.h"
 
 #include <algorithm>
 #include <cstring>
+
+extern PreferencesPersistence persistence;
 
 SemaphoreHandle_t g_state_mutex = nullptr;
 
@@ -260,66 +263,83 @@ void AppState::setKilnStateFromProgramConfigStart() {
     unlockSt();
 }
 
-void AppState::captureIntoSelectionSnapshot(ProgramSelectionSnapshot* dst) const {
-    if (!dst)
+void AppState::clampPreviousProgramIndexLocked() {
+    if (!g_previous_program_index.valid)
         return;
-    lockSt();
-    dst->activeProgramIndex = activeProgramIndex_;
-    dst->valid              = true;
-
-    for (int i = 0; i < 4; ++i) {
-        if (i < (int)predefinedPrograms_.size()) {
-            dst->preCone[i]   = predefinedPrograms_[i].origCone;
-            dst->preCandle[i] = predefinedPrograms_[i].origCandle;
-            dst->preSoak[i]   = predefinedPrograms_[i].origSoak;
-        }
-    }
-
-    dst->hasCustomSlot = false;
-    dst->customIndex   = 0;
-    dst->customCopy    = {};
-
-    if (activeProgramIndex_ >= 4) {
-        const size_t ci = static_cast<size_t>(activeProgramIndex_ - 4);
-        if (ci < customPrograms_.size()) {
-            dst->hasCustomSlot = true;
-            dst->customIndex   = static_cast<int>(ci);
-            dst->customCopy    = customPrograms_[ci];
-        }
-    }
-    unlockSt();
+    const int maxIdx = static_cast<int>(3 + customPrograms_.size());
+    if (g_previous_program_index.programIndex < 0 ||
+        g_previous_program_index.programIndex > maxIdx)
+        g_previous_program_index.valid = false;
 }
 
-void AppState::applySelectionSnapshot(const ProgramSelectionSnapshot& snap) {
-    if (!snap.valid)
-        return;
+void AppState::commitProgramSelection(const ProgramSelectionCommitDraft& d) {
     lockSt();
-    for (int i = 0; i < 4; ++i) {
-        if (i >= (int)predefinedPrograms_.size())
-            continue;
-        predefinedPrograms_[i].origCone   = snap.preCone[i];
-        predefinedPrograms_[i].origCandle = snap.preCandle[i];
-        predefinedPrograms_[i].origSoak   = snap.preSoak[i];
-        regeneratePredefinedSlotLocked(i);
+    const int    ai    = d.activeIndex;
+    const size_t nCust = customPrograms_.size();
+    if (ai < 0 || ai > static_cast<int>(3 + nCust)) {
+        unlockSt();
+        return;
     }
 
-    if (snap.hasCustomSlot && snap.customIndex >= 0) {
-        const size_t need = static_cast<size_t>(snap.customIndex) + 1;
-        while (customPrograms_.size() < need)
-            customPrograms_.push_back(FiringProgram{});
-        customPrograms_[static_cast<size_t>(snap.customIndex)] = snap.customCopy;
+    if (ai != activeProgramIndex_) {
+        g_previous_program_index.valid        = true;
+        g_previous_program_index.programIndex = activeProgramIndex_;
     }
 
-    activeProgramIndex_ = snap.activeProgramIndex;
+    if (ai <= 3) {
+        std::string cone = d.cone.empty() ? ((ai <= 1) ? std::string("08") : std::string("5")) : d.cone;
+        if (ai == 0)
+            predefinedPrograms_[0] = ProfileGenerator::generateFastBisque(cone, d.candle, d.soak);
+        else if (ai == 1)
+            predefinedPrograms_[1] = ProfileGenerator::generateSlowBisque(cone, d.candle, d.soak);
+        else if (ai == 2)
+            predefinedPrograms_[2] = ProfileGenerator::generateFastGlaze(cone, d.candle, d.soak);
+        else
+            predefinedPrograms_[3] = ProfileGenerator::generateSlowGlaze(cone, d.candle, d.soak);
+    }
+
+    activeProgramIndex_ = ai;
     syncActiveProgramNameWithIndex();
     unlockSt();
+
+    persistence.saveCustomPrograms();
+}
+
+bool AppState::swapProgramSelectionWithPrevious() {
+    lockSt();
+    if (status_.currentState != KilnState::IDLE) {
+        unlockSt();
+        return false;
+    }
+    if (!g_previous_program_index.valid) {
+        unlockSt();
+        return false;
+    }
+
+    const int maxIdx = static_cast<int>(3 + customPrograms_.size());
+    const int prev   = g_previous_program_index.programIndex;
+    if (prev < 0 || prev > maxIdx) {
+        g_previous_program_index.valid = false;
+        unlockSt();
+        return false;
+    }
+
+    const int cur = activeProgramIndex_;
+    activeProgramIndex_                      = prev;
+    g_previous_program_index.programIndex = cur;
+    g_previous_program_index.valid        = true;
+    syncActiveProgramNameWithIndex();
+    unlockSt();
+
+    persistence.saveCustomPrograms();
+    return true;
 }
 
 void AppState::commitLoadedPrograms(LoadedProgramsBundle bundle) {
     lockSt();
     if (bundle.predefinedPrograms.size() == 4)
         predefinedPrograms_ = std::move(bundle.predefinedPrograms);
-    customPrograms_   = std::move(bundle.customPrograms);
+    customPrograms_     = std::move(bundle.customPrograms);
     activeProgramIndex_ = bundle.activeProgramIndex;
     if (activeProgramIndex_ < 0)
         activeProgramIndex_ = 0;
@@ -335,6 +355,7 @@ void AppState::commitLoadedPrograms(LoadedProgramsBundle bundle) {
             status_.activeProgramName = predefinedPrograms_[0].name;
         }
     }
+    clampPreviousProgramIndexLocked();
     unlockSt();
 }
 

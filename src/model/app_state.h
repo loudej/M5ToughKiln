@@ -9,7 +9,15 @@
 #include <string>
 #include <vector>
 
-struct ProgramSelectionSnapshot;
+#include "program_selection_snapshot.h"
+
+/// Cone/candle/soak for the row in `activeIndex` when that index is 0..3; ignored for custom slots.
+struct ProgramSelectionCommitDraft {
+    int         activeIndex = 0;
+    std::string cone;
+    int         candle = 0;
+    int         soak   = 0;
+};
 
 /// Protects `appState`. Any task may call the public getters/setters on `AppState`;
 /// each acquires this mutex only for the duration of the copy. `FiringController::update()`
@@ -83,12 +91,19 @@ public:
 
     void setKilnStateFromProgramConfigStart();
 
-    void captureIntoSelectionSnapshot(ProgramSelectionSnapshot* dst) const;
-    void applySelectionSnapshot(const ProgramSelectionSnapshot& src);
+    /// Updates predefined parameters when activeIndex <= 3, sets active index. When the chosen index differs from the
+    /// current one, stores the old index as `g_previous_program_index` (shortcut between two slots, not undo within a slot).
+    void commitProgramSelection(const ProgramSelectionCommitDraft& d);
+
+    /// Swaps active program index with `g_previous_program_index` when IDLE and indices are valid.
+    bool swapProgramSelectionWithPrevious();
 
     void commitLoadedPrograms(LoadedProgramsBundle bundle);
 
     PersistSnapshot snapshotForPersist() const;
+
+private:
+    void clampPreviousProgramIndexLocked();
 };
 
 extern AppState appState;

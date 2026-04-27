@@ -3,6 +3,7 @@
 #include "../model/firing_program.h"
 #include "../model/kiln_status.h"
 #include "../model/profile_generator.h"
+#include "../model/program_selection_snapshot.h"
 #include "../model/temp_units.h"
 #include "../hardware/kiln_sensor_read.h"
 #include "../ui/ui_profile_chart.h"
@@ -115,25 +116,6 @@ int thermal_pct(float tgtC, float peakC, float floorC) {
     return pct;
 }
 
-const char* kiln_state_key(KilnState s) {
-    switch (s) {
-        case KilnState::IDLE:
-            return "idle";
-        case KilnState::RAMPING:
-            return "ramping";
-        case KilnState::SOAKING:
-            return "soaking";
-        case KilnState::COOLING:
-            return "cooling";
-        case KilnState::DONE:
-            return "done";
-        case KilnState::ERROR:
-            return "error";
-        default:
-            return "idle";
-    }
-}
-
 const char* thermal_tone(KilnState st) {
     switch (st) {
         case KilnState::RAMPING:
@@ -219,12 +201,14 @@ void kiln_dashboard_serialize_status(String& out) {
 
     doc["programName"] = tv.status.activeProgramName;
 
+    doc["previousSelectionValid"] = g_previous_program_index.valid;
+
     char statusBuf[160];
     const char* statusTone = "normal";
     fill_status_line(statusBuf, &statusTone, tv.status);
     doc["statusText"]   = statusBuf;
     doc["statusTone"]   = statusTone;
-    doc["kilnState"]    = kiln_state_key(tv.status.currentState);
+    doc["kilnState"]    = kilnStateJsonKey(tv.status.currentState);
     doc["powerPercent"] = static_cast<int>(tv.status.power * 100.f + 0.5f);
     doc["traceRevision"] = ui_profile_chart_trace_revision();
 

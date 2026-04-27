@@ -39,4 +39,24 @@ struct KilnStatus {
     std::string frozenControllerError{};
 };
 
+/// JSON string for `kilnState` on web/API (`idle`, `ramping`, …).
+inline const char* kilnStateJsonKey(KilnState s) {
+    switch (s) {
+        case KilnState::IDLE:
+            return "idle";
+        case KilnState::RAMPING:
+            return "ramping";
+        case KilnState::SOAKING:
+            return "soaking";
+        case KilnState::COOLING:
+            return "cooling";
+        case KilnState::DONE:
+            return "done";
+        case KilnState::ERROR:
+            return "error";
+        default:
+            return "idle";
+    }
+}
+
 #endif // KILN_STATUS_H

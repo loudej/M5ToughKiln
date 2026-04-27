@@ -1,30 +1,12 @@
 #ifndef PROGRAM_SELECTION_SNAPSHOT_H
 #define PROGRAM_SELECTION_SNAPSHOT_H
 
-#include "app_state.h"
-#include "firing_program.h"
-
-/// Full snapshot of which program is active and all parameters needed to restore
-/// predefined generator inputs and the selected custom program body.
-struct ProgramSelectionSnapshot {
-    int  activeProgramIndex = 0;
-    bool valid              = false;
-
-    std::string preCone[4];
-    int         preCandle[4]{};
-    int         preSoak[4]{};
-
-    bool          hasCustomSlot = false;
-    int           customIndex   = 0;
-    FiringProgram customCopy{};
-
-    void captureFrom(const AppState& app);
-    void applyTo(AppState& app) const;
+/// Last *other* program slot index for quick toggle with the swap control — not undo of edits within a slot.
+struct PreviousProgramIndex {
+    bool valid = false;
+    int  programIndex = 0;
 };
 
-extern ProgramSelectionSnapshot g_previous_program_selection;
-
-void program_selection_capture_current_as_previous();
-void program_selection_swap_with_previous();
+extern PreviousProgramIndex g_previous_program_index;
 
 #endif
