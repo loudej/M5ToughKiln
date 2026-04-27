@@ -46,25 +46,6 @@ float ProfileGenerator::coneTargetF(int c) {
 
 // ── Program generators ───────────────────────────────────────────────────────
 
-FiringProgram ProfileGenerator::generateSlowBisque(const std::string& cone, int candleMinutes, int soakMinutes) {
-    FiringProgram prog;
-    prog.name = "Slow Bisque (Cone " + cone + ")";
-    prog.isCustom = false;
-    prog.origCone   = cone;
-    prog.origCandle = candleMinutes;
-    prog.origSoak   = soakMinutes;
-
-    float tF = coneTargetF(parseConeInt(cone));
-    float tC = fToC(tF);
-
-    prog.segments.push_back({fToC(250),        rateToC(80),  (uint32_t)candleMinutes});
-    prog.segments.push_back({fToC(1000),       rateToC(200), 0});
-    prog.segments.push_back({fToC(1100),       rateToC(100), 0});
-    prog.segments.push_back({fToC(tF - 250),   rateToC(180), 0});
-    prog.segments.push_back({tC,               rateToC(80),  (uint32_t)soakMinutes});
-    return prog;
-}
-
 FiringProgram ProfileGenerator::generateFastBisque(const std::string& cone, int candleMinutes, int soakMinutes) {
     FiringProgram prog;
     prog.name = "Fast Bisque (Cone " + cone + ")";
@@ -81,6 +62,25 @@ FiringProgram ProfileGenerator::generateFastBisque(const std::string& cone, int 
     prog.segments.push_back({fToC(1100),       rateToC(150), 0});
     prog.segments.push_back({fToC(tF - 250),   rateToC(180), 0});
     prog.segments.push_back({tC,               rateToC(108), (uint32_t)soakMinutes});
+    return prog;
+}
+
+FiringProgram ProfileGenerator::generateSlowBisque(const std::string& cone, int candleMinutes, int soakMinutes) {
+    FiringProgram prog;
+    prog.name = "Slow Bisque (Cone " + cone + ")";
+    prog.isCustom = false;
+    prog.origCone   = cone;
+    prog.origCandle = candleMinutes;
+    prog.origSoak   = soakMinutes;
+
+    float tF = coneTargetF(parseConeInt(cone));
+    float tC = fToC(tF);
+
+    prog.segments.push_back({fToC(250),        rateToC(80),  (uint32_t)candleMinutes});
+    prog.segments.push_back({fToC(1000),       rateToC(200), 0});
+    prog.segments.push_back({fToC(1100),       rateToC(100), 0});
+    prog.segments.push_back({fToC(tF - 250),   rateToC(180), 0});
+    prog.segments.push_back({tC,               rateToC(80),  (uint32_t)soakMinutes});
     return prog;
 }
 

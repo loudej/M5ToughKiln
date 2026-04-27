@@ -3,6 +3,7 @@
 
 #include "persistence_service.h"
 #include <Preferences.h>
+#include <string>
 
 class PreferencesPersistence : public IPersistenceService {
 private:
@@ -16,6 +17,10 @@ public:
 
     bool loadSettings();
     bool saveSettings();
+
+    std::string loadWifiSsid();
+    std::string loadWifiPass();
+    void        saveWifiCredentials(const std::string& ssid, const std::string& pass);
 };
 
 #endif // PREFERENCES_PERSISTENCE_H

@@ -229,3 +229,24 @@ bool PreferencesPersistence::saveSettings() {
     prefs.end();
     return true;
 }
+
+std::string PreferencesPersistence::loadWifiSsid() {
+    prefs.begin(NVS_SETTINGS_NAMESPACE, true);
+    String s = prefs.getString("wifi_ssid", "");
+    prefs.end();
+    return std::string(s.c_str());
+}
+
+std::string PreferencesPersistence::loadWifiPass() {
+    prefs.begin(NVS_SETTINGS_NAMESPACE, true);
+    String s = prefs.getString("wifi_pass", "");
+    prefs.end();
+    return std::string(s.c_str());
+}
+
+void PreferencesPersistence::saveWifiCredentials(const std::string& ssid, const std::string& pass) {
+    prefs.begin(NVS_SETTINGS_NAMESPACE, false);
+    prefs.putString("wifi_ssid", ssid.c_str());
+    prefs.putString("wifi_pass", pass.c_str());
+    prefs.end();
+}

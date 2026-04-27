@@ -6,6 +6,9 @@
 #include "control/power_output.h"
 #include "control/firing_controller.h"
 #include "service/preferences_persistence.h"
+#include "server/kiln_wifi.h"
+#include "server/kiln_http_server.h"
+#include "ui/ui_settings_screen.h"
 
 // LVGL display and touch driver
 static lv_display_t *disp;
@@ -80,6 +83,7 @@ void setup()
     app_state_init();
     persistence.loadSettings();
     persistence.loadCustomPrograms(appState.customPrograms);
+    kiln_wifi_station_begin_from_nvs();
 
     while (!hardware.init()) {
         M5.Log.println("KMeter ISO: retrying in 500 ms ...");
@@ -110,8 +114,12 @@ void loop()
     // 3. Update UI at 2Hz to prevent redrawing too often
     if (current_ms - last_ui_update_ms > 500) {
         ui_main_screen_update();
+        ui_settings_screen_update_status();
         last_ui_update_ms = current_ms;
     }
+
+    kiln_wifi_service();
+    kiln_http_server_poll();
 
     delay(5);
 }

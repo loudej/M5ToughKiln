@@ -1,6 +1,8 @@
 #include "../lvgl_includes.h"
 #include "ui_keypad.h"
 
+void ui_text_keyboard_hide();
+
 static constexpr lv_coord_t KEYPAD_W = 140;
 static constexpr lv_coord_t KEYPAD_HT = 200;
 
@@ -67,6 +69,7 @@ void ui_keypad_init() {
 
 void ui_keypad_set_target(lv_obj_t * ta) {
     if (!global_kb) return;
+    ui_text_keyboard_hide();
     lv_keyboard_set_textarea(global_kb, ta);
     ui_keypad_show();
 }

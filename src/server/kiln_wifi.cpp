@@ -1,0 +1,155 @@
+#include "kiln_wifi.h"
+#include "../service/preferences_persistence.h"
+
+#include <WiFi.h>
+#include <Arduino.h>
+#include <algorithm>
+#include <unordered_map>
+
+extern PreferencesPersistence persistence;
+
+enum class ConnPhase { Idle, Disconnecting, Connecting };
+
+static ConnPhase     s_phase = ConnPhase::Idle;
+static std::string   s_join_ssid;
+static std::string   s_join_pass;
+static uint32_t      s_phase_ms = 0;
+
+static void dedupe_and_sort(std::vector<KilnWifiNetwork>& nets) {
+    std::unordered_map<std::string, int> best;
+    for (const auto& n : nets) {
+        if (n.ssid.empty())
+            continue;
+        auto it = best.find(n.ssid);
+        if (it == best.end() || n.rssi > it->second)
+            best[n.ssid] = n.rssi;
+    }
+    nets.clear();
+    nets.reserve(best.size());
+    for (const auto& p : best) {
+        KilnWifiNetwork row;
+        row.ssid = p.first;
+        row.rssi = p.second;
+        nets.push_back(std::move(row));
+    }
+    std::sort(nets.begin(), nets.end(),
+              [](const KilnWifiNetwork& a, const KilnWifiNetwork& b) { return a.rssi > b.rssi; });
+}
+
+void kiln_wifi_station_begin_from_nvs() {
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    std::string ssid = persistence.loadWifiSsid();
+    std::string pass = persistence.loadWifiPass();
+    if (!ssid.empty())
+        kiln_wifi_request_join(ssid, pass);
+}
+
+static void ensure_sta_mode() {
+    if (WiFi.getMode() != WIFI_STA)
+        WiFi.mode(WIFI_STA);
+}
+
+void kiln_wifi_scan(std::vector<KilnWifiNetwork>& out) {
+    out.clear();
+    ensure_sta_mode();
+    int n = WiFi.scanNetworks(false, false, false, 300);
+    if (n <= 0) {
+        WiFi.scanDelete();
+        return;
+    }
+
+    out.reserve(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        KilnWifiNetwork row;
+        row.ssid = WiFi.SSID(i).c_str();
+        row.rssi = WiFi.RSSI(i);
+        if (row.ssid.empty())
+            continue;
+        out.push_back(std::move(row));
+    }
+
+    WiFi.scanDelete();
+    dedupe_and_sort(out);
+}
+
+void kiln_wifi_request_join(const std::string& ssid, const std::string& pass) {
+    if (ssid.empty())
+        return;
+    s_join_ssid = ssid;
+    s_join_pass = pass;
+    s_phase     = ConnPhase::Disconnecting;
+    s_phase_ms  = millis();
+    WiFi.disconnect(false);
+}
+
+void kiln_wifi_service() {
+    switch (s_phase) {
+        case ConnPhase::Disconnecting: {
+            wl_status_t st = WiFi.status();
+            if (st == WL_DISCONNECTED || millis() - s_phase_ms > 900) {
+                WiFi.mode(WIFI_STA);
+                WiFi.setAutoReconnect(true);
+                WiFi.begin(s_join_ssid.c_str(), s_join_pass.c_str());
+                s_phase    = ConnPhase::Connecting;
+                s_phase_ms = millis();
+            }
+            break;
+        }
+        case ConnPhase::Connecting:
+            if (WiFi.status() == WL_CONNECTED) {
+                s_phase = ConnPhase::Idle;
+                persistence.saveWifiCredentials(s_join_ssid, s_join_pass);
+            } else if (millis() - s_phase_ms > 45000)
+                s_phase = ConnPhase::Idle;
+            break;
+        default:
+            break;
+    }
+}
+
+std::string kiln_wifi_ip_status_line() {
+    if (s_phase == ConnPhase::Disconnecting)
+        return "disconnecting";
+    if (s_phase == ConnPhase::Connecting)
+        return "connecting...";
+    if (WiFi.status() == WL_CONNECTED)
+        return WiFi.localIP().toString().c_str();
+    return "\xe2\x80\x94";
+}
+
+bool kiln_wifi_station_connect_blocking(const std::string& ssid, const std::string& pass,
+                                        uint32_t timeout_ms) {
+    if (ssid.empty())
+        return false;
+
+    WiFi.disconnect(true);
+    delay(100);
+    WiFi.mode(WIFI_STA);
+    WiFi.setAutoReconnect(true);
+    WiFi.begin(ssid.c_str(), pass.c_str());
+
+    const uint32_t start = millis();
+    while (WiFi.status() != WL_CONNECTED) {
+        if (millis() - start > timeout_ms)
+            return false;
+        delay(200);
+    }
+    return true;
+}
+
+bool kiln_wifi_station_connected() {
+    return WiFi.status() == WL_CONNECTED;
+}
+
+std::string kiln_wifi_station_ip() {
+    if (!kiln_wifi_station_connected())
+        return {};
+    return WiFi.localIP().toString().c_str();
+}
+
+int kiln_wifi_station_rssi_dbm() {
+    if (!kiln_wifi_station_connected())
+        return 0;
+    return WiFi.RSSI();
+}
