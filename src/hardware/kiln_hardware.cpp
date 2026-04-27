@@ -7,9 +7,6 @@
 bool KMeterISOHardware::init() {
     auto sda      = M5.getPin(m5::pin_name_t::port_a_sda);
     auto scl      = M5.getPin(m5::pin_name_t::port_a_scl);
-    // M5Unified's _pin_table_port_bc has no entry for board_M5Tough (only
-    // board_M5StackCore2), so getPin(port_b_out) returns 0xFFFFFFFF.
-    // M5Tough shares Core2 hardware: Port B pin 2 is GPIO 26.
     static constexpr int8_t PORT_B_OUT_GPIO = 26;
     auto relayOut = PORT_B_OUT_GPIO;
     M5.Log.printf("KMeter ISO init: Port A SDA=%u  SCL=%u  |  Port B relay=%d\n",
@@ -21,13 +18,19 @@ bool KMeterISOHardware::init() {
         return false;
     }
 
-    uint8_t fw = 0;
-    if (!kmeter.readFirmwareVersion(fw)) {
+    if (!kmeter.readFirmwareVersion(cachedFw)) {
         M5.Log.println("KMeter ISO: found but FW read failed");
         initialized = false;
         return false;
     }
-    M5.Log.printf("KMeter ISO: ready (FW=0x%02X)\n", fw);
+
+    if (!kmeter.readUnitI2cAddress(cachedI2cAddr)) {
+        M5.Log.println("KMeter ISO: I2C address register read failed");
+        initialized = false;
+        return false;
+    }
+
+    M5.Log.printf("KMeter ISO: ready (FW=0x%02X  I2C=0x%02X)\n", cachedFw, cachedI2cAddr);
 
     relayPin = relayOut;
     pinMode(relayPin, OUTPUT);
@@ -37,17 +40,29 @@ bool KMeterISOHardware::init() {
     return true;
 }
 
-float KMeterISOHardware::readTemperature() {
-    if (!initialized) return lastTemp;
+const KilnSensorRead& KMeterISOHardware::readSensor() {
+    lastRead               = KilnSensorRead{};
+    lastRead.hardwareInitialized = initialized;
+    lastRead.firmwareVersion     = cachedFw;
+    lastRead.i2cAddressReported  = cachedI2cAddr;
 
-    uint8_t status = 0;
-    if (kmeter.readStatus(status) && status == 0) {
-        float t;
-        if (kmeter.readCelsius(t)) {
-            lastTemp = t;
-        }
+    if (!initialized) {
+        lastRead.communicationOk     = false;
+        lastRead.thermocoupleCelsius = stickyThermocoupleC;
+        return lastRead;
     }
-    return lastTemp;
+
+    kmeter.pollRegisters(lastRead);
+    lastRead.communicationOk = lastRead.statusRegisterValid;
+
+    if (lastRead.controlUsable()) {
+        stickyThermocoupleC =
+            lastRead.thermocoupleRawCentidegrees * 0.01f;
+    }
+
+    lastRead.thermocoupleCelsius = stickyThermocoupleC;
+
+    return lastRead;
 }
 
 void KMeterISOHardware::setRelay(bool on) {
@@ -69,7 +84,7 @@ bool MockKilnHardware::init() {
     return true;
 }
 
-float MockKilnHardware::readTemperature() {
+const KilnSensorRead& MockKilnHardware::readSensor() {
     uint32_t now = millis();
     float dt = (now - lastUpdateMs) / 1000.0f;
     lastUpdateMs = now;
@@ -77,16 +92,33 @@ float MockKilnHardware::readTemperature() {
     if (relayState) {
         currentTemp += (heatRatePerSec * dt);
     } else {
-        // Natural cooling towards ambient (25C)
         if (currentTemp > 25.0f) {
             currentTemp -= (coolRatePerSec * dt);
             if (currentTemp < 25.0f) currentTemp = 25.0f;
         }
     }
 
-    // Add a tiny bit of noise to simulate real sensor readings
     float noise = ((random(100) / 100.0f) - 0.5f) * 0.2f;
-    return currentTemp + noise;
+    float tc     = currentTemp + noise;
+
+    lastRead                   = KilnSensorRead{};
+    lastRead.hardwareInitialized = true;
+    lastRead.communicationOk     = true;
+    lastRead.statusRegisterValid = true;
+    lastRead.statusRegister      = 0;
+    lastRead.thermocoupleSampleValid       = true;
+    lastRead.thermocoupleRawCentidegrees   = (int32_t)(tc * 100.f);
+    lastRead.thermocoupleCelsius           = tc;
+    lastRead.internalSampleValid           = true;
+    lastRead.internalCelsius               = 25.f;
+    lastRead.thermocoupleFahrenheitValid   = true;
+    lastRead.thermocoupleFahrenheit        = tc * 9.f / 5.f + 32.f;
+    lastRead.internalFahrenheitValid       = true;
+    lastRead.internalFahrenheit            = 77.f;
+    lastRead.firmwareVersion               = 0;
+    lastRead.i2cAddressReported            = KMeterIsoBareWire::DEFAULT_ADDRESS;
+
+    return lastRead;
 }
 
 void MockKilnHardware::setRelay(bool on) {

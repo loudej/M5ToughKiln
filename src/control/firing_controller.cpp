@@ -1,8 +1,18 @@
 #include "firing_controller.h"
+#include "../hardware/kiln_sensor_read.h"
 #include "../model/app_state.h"
 #include <Arduino.h>
+#include <string>
 
 namespace {
+
+void enterErrorState(std::string message) {
+    if (appState.status.currentState == KilnState::ERROR)
+        return;
+    appState.status.currentState           = KilnState::ERROR;
+    appState.status.frozenControllerError = std::move(message);
+}
+
 constexpr uint32_t kMsPerSecond = 1000;
 constexpr uint32_t kMsPerMinute = 60000;
 constexpr uint32_t kMsPerHour   = 3600000;
@@ -21,6 +31,8 @@ constexpr float kMaxPidDt_sec     = 2.f;
 constexpr float kMinPidDt_sec     = 0.001f;
 
 constexpr float kDerivativeLpfAlpha = 0.25f;
+
+constexpr uint16_t kMaxConsecutiveSensorFailures = 25;  // ~2.5 s at 100 ms cadence
 }  // namespace
 
 FiringController::FiringController(IKilnHardware* hw, PowerOutput* po)
@@ -32,9 +44,13 @@ void FiringController::update() {
     if (now - lastUpdateMs < kUpdateIntervalMs) return;
     lastUpdateMs = now;
 
-    appState.status.currentTemperature = hardware->readTemperature();
+    appState.status.sensor             = hardware->readSensor();
+    appState.status.currentTemperature = appState.status.sensor.thermocoupleCelsius;
 
     if (appState.status.currentState == KilnState::IDLE || appState.status.currentState == KilnState::ERROR) {
+        consecutiveSensorFailures = 0;
+        if (appState.status.currentState == KilnState::IDLE)
+            appState.status.frozenControllerError.clear();
         powerOutput->setEnabled(false);
         segmentStartMs    = 0;
         programStartMs    = 0;
@@ -48,6 +64,24 @@ void FiringController::update() {
         lastTemp        = 0.f;
         return;
     }
+
+    if (!appState.status.sensor.controlUsable()) {
+        consecutiveSensorFailures++;
+        if (consecutiveSensorFailures >= kMaxConsecutiveSensorFailures) {
+            const KilnSensorRead& sr = appState.status.sensor;
+            if (sr.deviceReportsFault()) {
+                char detail[32];
+                kilnFormatStatusFaultLine(sr.statusRegister, detail, sizeof detail);
+                enterErrorState("ERROR: "+std::string(detail));
+            } else {
+                enterErrorState("ERROR: Sensor lost");
+            }
+        }
+        powerOutput->setPower(0.f);
+        powerOutput->update();
+        return;
+    }
+    consecutiveSensorFailures = 0;
 
     armPowerIfNeeded(now);
     processSegment(now);
@@ -80,7 +114,7 @@ void FiringController::applyTelemetryAndPid(uint32_t now, float setpoint) {
 void FiringController::processSegment(uint32_t now) {
     FiringProgram* prog = appState.activeProgram();
     if (!prog) {
-        appState.status.currentState = KilnState::ERROR;
+        enterErrorState("No program");
         return;
     }
     if (currentSegmentIdx >= (int)prog->segments.size()) {

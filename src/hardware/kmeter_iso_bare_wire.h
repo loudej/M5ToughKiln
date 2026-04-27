@@ -5,6 +5,8 @@
 #include <Wire.h>
 #include <cstdint>
 
+#include "kiln_sensor_read.h"
+
 // Minimal driver for the M5Stack KMeter ISO Unit (MAX31855KASA-based, 0x66).
 //
 // Why hand-rolled instead of M5Unit-METER:
@@ -46,6 +48,9 @@ public:
     // Read the 1-byte firmware version (cheap liveness check).
     bool readFirmwareVersion(uint8_t& version);
 
+    // Register 0xFF — firmware’s idea of the unit I²C address (normally 0x66).
+    bool readUnitI2cAddress(uint8_t& address);
+
     // Read the 1-byte status register. 0 = data ready and no fault.
     // Non-zero indicates an open thermocouple or a short to GND/VCC.
     bool readStatus(uint8_t& status);
@@ -55,6 +60,10 @@ public:
 
     // Read the chip's internal cold-junction temperature in °C.
     bool readInternalCelsius(float& celsius);
+
+    /// One I²C sweep: STATUS, TC °C/°F, internal °C/°F per M5 register map.
+    /// Sets validity flags per field; leaves thermocoupleCelsius untouched (hardware layer).
+    void pollRegisters(KilnSensorRead& out);
 
 private:
     TwoWire& _wire;

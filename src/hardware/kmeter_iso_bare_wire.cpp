@@ -1,8 +1,11 @@
 #include "kmeter_iso_bare_wire.h"
 
 namespace {
+constexpr uint8_t REG_I2C_ADDRESS         = 0xFF;
 constexpr uint8_t REG_TEMPERATURE_C       = 0x00;
+constexpr uint8_t REG_TEMPERATURE_F       = 0x04;
 constexpr uint8_t REG_INTERNAL_TEMP_C     = 0x10;
+constexpr uint8_t REG_INTERNAL_TEMP_F     = 0x14;
 constexpr uint8_t REG_STATUS              = 0x20;
 constexpr uint8_t REG_FIRMWARE_VERSION    = 0xFE;
 }  // namespace
@@ -54,6 +57,10 @@ bool KMeterIsoBareWire::readFirmwareVersion(uint8_t& version) {
     return readRegister(REG_FIRMWARE_VERSION, &version, 1);
 }
 
+bool KMeterIsoBareWire::readUnitI2cAddress(uint8_t& address) {
+    return readRegister(REG_I2C_ADDRESS, &address, 1);
+}
+
 bool KMeterIsoBareWire::readStatus(uint8_t& status) {
     return readRegister(REG_STATUS, &status, 1);
 }
@@ -70,4 +77,36 @@ bool KMeterIsoBareWire::readInternalCelsius(float& celsius) {
     if (!readInt32LE(REG_INTERNAL_TEMP_C, raw)) return false;
     celsius = raw * 0.01f;
     return true;
+}
+
+void KMeterIsoBareWire::pollRegisters(KilnSensorRead& out) {
+    out.statusRegisterValid = readStatus(out.statusRegister);
+    if (!out.statusRegisterValid) {
+        out.thermocoupleSampleValid       = false;
+        out.internalSampleValid             = false;
+        out.thermocoupleFahrenheitValid    = false;
+        out.internalFahrenheitValid        = false;
+        return;
+    }
+
+    int32_t raw = 0;
+    out.thermocoupleSampleValid = readInt32LE(REG_TEMPERATURE_C, raw);
+    if (out.thermocoupleSampleValid) {
+        out.thermocoupleRawCentidegrees = raw;
+    }
+
+    out.internalSampleValid = readInt32LE(REG_INTERNAL_TEMP_C, raw);
+    if (out.internalSampleValid) {
+        out.internalCelsius = raw * 0.01f;
+    }
+
+    out.thermocoupleFahrenheitValid = readInt32LE(REG_TEMPERATURE_F, raw);
+    if (out.thermocoupleFahrenheitValid) {
+        out.thermocoupleFahrenheit = raw * 0.01f;
+    }
+
+    out.internalFahrenheitValid = readInt32LE(REG_INTERNAL_TEMP_F, raw);
+    if (out.internalFahrenheitValid) {
+        out.internalFahrenheit = raw * 0.01f;
+    }
 }

@@ -88,6 +88,7 @@ static void btn_start_event_cb(lv_event_t * e) {
             appState.status.currentState = KilnState::RAMPING;
         } else {
             appState.status.currentState = KilnState::IDLE;
+            appState.status.frozenControllerError.clear();
         }
         ui_main_screen_update();
     }
@@ -267,7 +268,19 @@ void ui_main_screen_update() {
 
     // Update state dependent UI
     if (appState.status.currentState == KilnState::IDLE) {
-        lv_label_set_text(lbl_status, "IDLE");
+        const KilnSensorRead& sr = appState.status.sensor;
+        if (!sr.hardwareInitialized || !sr.communicationOk) {
+            lv_label_set_text(lbl_status, "NO SENSOR");
+            lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_ORANGE), 0);
+        } else if (sr.deviceReportsFault()) {
+            char faultLine[28];
+            kilnFormatStatusFaultLine(sr.statusRegister, faultLine, sizeof faultLine);
+            lv_label_set_text(lbl_status, faultLine);
+            lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_ORANGE), 0);
+        } else {
+            lv_label_set_text(lbl_status, "IDLE");
+            lv_obj_set_style_text_color(lbl_status, lv_color_white(), 0);
+        }
         update_idle_program_labels();
         lv_obj_clear_flag(lbl_elapsed_time, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
@@ -275,7 +288,12 @@ void ui_main_screen_update() {
         lv_obj_set_style_bg_color(btn_start, lv_palette_main(LV_PALETTE_GREEN), 0);
         lv_obj_clear_state(btn_config, LV_STATE_DISABLED);
     } else if (appState.status.currentState == KilnState::ERROR) {
-        lv_label_set_text(lbl_status, "ERROR!");
+        if (!appState.status.frozenControllerError.empty()) {
+            lv_label_set_text(lbl_status, appState.status.frozenControllerError.c_str());
+        } else {
+            lv_label_set_text(lbl_status, "ERROR: Unknown");
+        }
+        lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_RED), 0);
         update_idle_program_labels();
         lv_obj_clear_flag(lbl_elapsed_time, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(cont_time_running, LV_OBJ_FLAG_HIDDEN);
@@ -284,12 +302,25 @@ void ui_main_screen_update() {
         lv_obj_clear_state(btn_config, LV_STATE_DISABLED);
     } else {
         // Running states (Ramping, Soaking, Cooling)
-        if (appState.status.currentState == KilnState::RAMPING) {
-            lv_label_set_text(lbl_status, "RAMPING");
-        } else if (appState.status.currentState == KilnState::SOAKING) {
-            lv_label_set_text(lbl_status, "SOAKING");
-        } else if (appState.status.currentState == KilnState::COOLING) {
-            lv_label_set_text(lbl_status, "COOLING");
+        const KilnSensorRead& sr = appState.status.sensor;
+        if (!sr.controlUsable()) {
+            if (sr.deviceReportsFault()) {
+                char faultLine[28];
+                kilnFormatStatusFaultLine(sr.statusRegister, faultLine, sizeof faultLine);
+                lv_label_set_text(lbl_status, faultLine);
+            } else {
+                lv_label_set_text(lbl_status, "SENSOR?");
+            }
+            lv_obj_set_style_text_color(lbl_status, lv_palette_main(LV_PALETTE_ORANGE), 0);
+        } else {
+            lv_obj_set_style_text_color(lbl_status, lv_color_white(), 0);
+            if (appState.status.currentState == KilnState::RAMPING) {
+                lv_label_set_text(lbl_status, "RAMPING");
+            } else if (appState.status.currentState == KilnState::SOAKING) {
+                lv_label_set_text(lbl_status, "SOAKING");
+            } else if (appState.status.currentState == KilnState::COOLING) {
+                lv_label_set_text(lbl_status, "COOLING");
+            }
         }
 
         float dispTarget = toDisplayTemp(appState.status.targetTemperature, appState.tempUnit);

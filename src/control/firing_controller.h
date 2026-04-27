@@ -30,6 +30,8 @@ private:
     int      currentSegmentIdx = 0;
     float    segmentStartTemp  = 25.0f;
 
+    uint16_t consecutiveSensorFailures = 0;
+
     void armPowerIfNeeded(uint32_t now);
     void applyTelemetryAndPid(uint32_t now, float setpoint);
     void processSegment(uint32_t now);
