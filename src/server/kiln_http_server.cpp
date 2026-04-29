@@ -9,6 +9,7 @@
 #include "../model/kiln_status.h"
 
 #include <ArduinoJson.h>
+#include <ElegantOTA.h>
 #include <WebServer.h>
 #include <Arduino.h>
 #include <cstring>
@@ -16,6 +17,7 @@
 static WebServer server(80);
 static bool       s_routes_registered = false;
 static bool       s_server_begun      = false;
+static bool       s_elegant_ota_begun = false;
 
 static uint32_t s_http_t0_us;
 static String   s_http_path;
@@ -270,8 +272,13 @@ void kiln_http_server_poll() {
         server.begin();
         s_server_begun = true;
     }
+    if (!s_elegant_ota_begun) {
+        ElegantOTA.begin(&server);
+        s_elegant_ota_begun = true;
+    }
 
     server.handleClient();
+    ElegantOTA.loop();
 
     const uint32_t now = millis();
     if (s_agg_last_flush_ms == 0)

@@ -11,6 +11,7 @@
 /// GET /api/programs — program list + predefined cone/candle/soak + custom segments (display units)
 /// POST /api/programs/save — JSON { activeIndex, cone?, candle?, soak? } — applies like device config screen
 /// POST /api/programs/swap-previous — swap with stored previous selection (same as loop button)
+/// GET/POST /update   — OTA firmware upload (ElegantOTA) when Wi-Fi is up
 
 void kiln_http_server_poll();
 

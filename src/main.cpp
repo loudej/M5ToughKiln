@@ -8,6 +8,7 @@
 #include "service/preferences_persistence.h"
 #include "server/kiln_wifi.h"
 #include "server/kiln_http_server.h"
+#include "server/kiln_arduino_ota.h"
 #include "ui/ui_settings_screen.h"
 
 #include <Arduino.h>
@@ -254,6 +255,8 @@ void loop()
     }
 
     kiln_wifi_service();
+
+    kiln_arduino_ota_service();
 
     const uint32_t http_t0 = millis();
     kiln_http_server_poll();
