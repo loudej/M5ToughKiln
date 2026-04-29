@@ -3,14 +3,20 @@
 #include "ui.h"
 #include "ui_sizes.h"
 #include "ui_text_keyboard.h"
+#include "../model/kiln_pid_gains.h"
 #include "../model/app_state.h"
 #include "../model/temp_units.h"
 #include "../service/preferences_persistence.h"
 #include "../server/kiln_wifi.h"
 
+#include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <cmath>
 #include <cstring>
 #include <string>
 #include <vector>
+#include <algorithm>
 
 extern PreferencesPersistence persistence;
 
@@ -38,6 +44,151 @@ static bool s_dropdown_suppress_evt = false;
 
 static std::string               s_selected_ssid;
 static std::string               s_wifi_pass;
+static lv_obj_t *ta_pid_kp;
+static lv_obj_t *ta_pid_ki;
+static lv_obj_t *ta_pid_kd;
+
+static char s_pid_ph_kp[24];
+static char s_pid_ph_ki[24];
+static char s_pid_ph_kd[24];
+
+static void trim_inplace_pid(std::string& t) {
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.front())))
+        t.erase(t.begin());
+    while (!t.empty() && std::isspace(static_cast<unsigned char>(t.back())))
+        t.pop_back();
+}
+
+/** Returns true iff `tin` trims to non-empty and parses wholly as float. */
+static bool parse_pid_float_opt(const std::string& tin, float* out) {
+    std::string t = tin;
+    trim_inplace_pid(t);
+    if (t.empty())
+        return false;
+    std::replace(t.begin(), t.end(), ',', '.');
+
+    char* end = nullptr;
+    const float v = std::strtof(t.c_str(), &end);
+    while (end && *end != '\0' && std::isspace(static_cast<unsigned char>(*end)))
+        ++end;
+    if (!end || *end != '\0' || !std::isfinite(v))
+        return false;
+    *out = v;
+    return true;
+}
+
+static void reset_pid_placeholder_strings() {
+    const KilnPidGains d = kilnDefaultPidGains();
+    std::snprintf(s_pid_ph_kp, sizeof s_pid_ph_kp, "%.6g", static_cast<double>(d.kp));
+    std::snprintf(s_pid_ph_ki, sizeof s_pid_ph_ki, "%.6g", static_cast<double>(d.ki));
+    std::snprintf(s_pid_ph_kd, sizeof s_pid_ph_kd, "%.6g", static_cast<double>(d.kd));
+}
+
+static void refresh_pid_textareas_from_state() {
+    if (!ta_pid_kp || !ta_pid_ki || !ta_pid_kd)
+        return;
+
+    reset_pid_placeholder_strings();
+    lv_textarea_set_placeholder_text(ta_pid_kp, s_pid_ph_kp);
+    lv_textarea_set_placeholder_text(ta_pid_ki, s_pid_ph_ki);
+    lv_textarea_set_placeholder_text(ta_pid_kd, s_pid_ph_kd);
+
+    const uint8_t        m = appState.getPidOvMask();
+    const KilnPidGains ov = appState.getPidOvValues();
+
+    char buf[32];
+    if ((m & kPidOvKp) != 0) {
+        std::snprintf(buf, sizeof buf, "%.6g", static_cast<double>(ov.kp));
+        lv_textarea_set_text(ta_pid_kp, buf);
+    } else {
+        lv_textarea_set_text(ta_pid_kp, "");
+    }
+    if ((m & kPidOvKi) != 0) {
+        std::snprintf(buf, sizeof buf, "%.6g", static_cast<double>(ov.ki));
+        lv_textarea_set_text(ta_pid_ki, buf);
+    } else {
+        lv_textarea_set_text(ta_pid_ki, "");
+    }
+    if ((m & kPidOvKd) != 0) {
+        std::snprintf(buf, sizeof buf, "%.6g", static_cast<double>(ov.kd));
+        lv_textarea_set_text(ta_pid_kd, buf);
+    } else {
+        lv_textarea_set_text(ta_pid_kd, "");
+    }
+}
+
+static void commit_pid_textareas_from_state() {
+    if (!ta_pid_kp || !ta_pid_ki || !ta_pid_kd)
+        return;
+
+    uint8_t      mask = 0;
+    KilnPidGains ov{};
+
+    float v{};
+    std::string t;
+
+    const char *s = lv_textarea_get_text(ta_pid_kp);
+    t.assign(s ? s : "");
+    if (parse_pid_float_opt(t, &v)) {
+        mask |= kPidOvKp;
+        ov.kp = v;
+    }
+    s = lv_textarea_get_text(ta_pid_ki);
+    t.assign(s ? s : "");
+    if (parse_pid_float_opt(t, &v)) {
+        mask |= kPidOvKi;
+        ov.ki = v;
+    }
+    s = lv_textarea_get_text(ta_pid_kd);
+    t.assign(s ? s : "");
+    if (parse_pid_float_opt(t, &v)) {
+        mask |= kPidOvKd;
+        ov.kd = v;
+    }
+
+    appState.setPidOvState(mask, ov);
+}
+
+static void pid_ta_kb_event(lv_event_t *e) {
+    lv_event_code_t c = lv_event_get_code(e);
+    lv_obj_t *tg      = reinterpret_cast<lv_obj_t *>(lv_event_get_target(e));
+
+    /// Do not steal focus while the passphrase modal has the keyboard.
+    if (pass_modal)
+        return;
+
+    if (c == LV_EVENT_FOCUSED) {
+        ui_text_keyboard_set_preset_settings_numeric(true);
+        ui_text_keyboard_set_target(tg);
+    } else if (c == LV_EVENT_DEFOCUSED)
+        ui_text_keyboard_hide();
+}
+
+static lv_obj_t *add_pid_row_ta(lv_obj_t *parent, const char *title) {
+    lv_obj_t *row = lv_obj_create(parent);
+    lv_obj_set_width(row, lv_pct(100));
+    lv_obj_set_height(row, LV_SIZE_CONTENT);
+    lv_obj_set_layout(row, LV_LAYOUT_FLEX);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_pad_column(row, UI_PAD_STD, 0);
+
+    lv_obj_t *lbl = lv_label_create(row);
+    lv_label_set_text(lbl, title);
+    lv_obj_set_width(lbl, lv_pct(22));
+
+    lv_obj_t *ta = lv_textarea_create(row);
+    lv_obj_set_flex_grow(ta, 1);
+    lv_textarea_set_one_line(ta, true);
+    lv_textarea_set_max_length(ta, 24);
+    lv_obj_add_event_cb(ta, pid_ta_kb_event, LV_EVENT_ALL, nullptr);
+
+    return ta;
+}
+
 static std::vector<KilnWifiNetwork> s_scan_results;
 
 static void refresh_wifi_labels();
@@ -47,9 +198,10 @@ static void close_pass_modal(bool apply);
 
 static void pass_modal_ta_event(lv_event_t *e) {
     lv_event_code_t c = lv_event_get_code(e);
-    if (c == LV_EVENT_FOCUSED)
+    if (c == LV_EVENT_FOCUSED) {
+        ui_text_keyboard_set_preset_settings_numeric(false);
         ui_text_keyboard_set_target(pass_modal_ta);
-    else if (c == LV_EVENT_DEFOCUSED)
+    } else if (c == LV_EVENT_DEFOCUSED)
         ui_text_keyboard_hide();
 }
 
@@ -238,6 +390,7 @@ static void on_passphrase_btn(lv_event_t *e) {
     lv_obj_add_event_cb(pass_modal_ta, pass_modal_ta_event, LV_EVENT_ALL, NULL);
 
     lv_obj_add_state(pass_modal_ta, LV_STATE_FOCUSED);
+    ui_text_keyboard_set_preset_settings_numeric(false);
     ui_text_keyboard_set_target(pass_modal_ta);
 }
 
@@ -250,8 +403,7 @@ static void wifi_scan_timer_cb(lv_timer_t *t) {
         return;
     }
 
-    kiln_wifi_scan(s_scan_results);
-    wifi_rebuild_dropdown_options(false);
+    kiln_wifi_scan_request_async();
 }
 
 static void refresh_unit_buttons() {
@@ -281,6 +433,7 @@ static void on_back(lv_event_t *e) {
     (void)e;
     close_pass_modal(false);
     ui_text_keyboard_hide();
+    commit_pid_textareas_from_state();
     persistence.saveSettings();
     ui_switch_to_main_screen();
 }
@@ -288,6 +441,8 @@ static void on_back(lv_event_t *e) {
 static void screen_delete_cb(lv_event_t *e) {
     (void)e;
     close_pass_modal(false);
+    ui_text_keyboard_clear_target();
+    ui_text_keyboard_hide();
     if (s_wifi_scan_timer) {
         lv_timer_del(s_wifi_scan_timer);
         s_wifi_scan_timer = nullptr;
@@ -297,6 +452,9 @@ static void screen_delete_cb(lv_event_t *e) {
     lbl_wifi_rssi      = nullptr;
     dropdown_wifi      = nullptr;
     btn_wifi_passphrase = nullptr;
+    ta_pid_kp = nullptr;
+    ta_pid_ki = nullptr;
+    ta_pid_kd = nullptr;
 }
 
 void ui_settings_screen_create() {
@@ -384,6 +542,14 @@ void ui_settings_screen_create() {
 
     refresh_unit_buttons();
 
+    lv_obj_t *lbl_pid_hdr = lv_label_create(cont_fill);
+    lv_label_set_text(lbl_pid_hdr, "PID");
+
+    ta_pid_kp = add_pid_row_ta(cont_fill, "Kp");
+    ta_pid_ki = add_pid_row_ta(cont_fill, "Ki");
+    ta_pid_kd = add_pid_row_ta(cont_fill, "Kd");
+    refresh_pid_textareas_from_state();
+
     // --- Wi-Fi ---
     lv_obj_t *lbl_wifi_hdr = lv_label_create(cont_fill);
     lv_label_set_text(lbl_wifi_hdr, "Wi-Fi");
@@ -451,7 +617,7 @@ void ui_settings_screen_create() {
     lv_label_set_text(lbl_pp, "Password...");
     lv_obj_center(lbl_pp);
 
-    kiln_wifi_scan(s_scan_results);
+    kiln_wifi_scan_request_async();
     wifi_rebuild_dropdown_options(true);
 
     s_wifi_scan_timer = lv_timer_create(wifi_scan_timer_cb, WIFI_SCAN_PERIOD_MS, NULL);
@@ -472,10 +638,19 @@ void ui_settings_screen_update_status() {
     bool open = wifi_dropdown_is_open();
     if (s_dropdown_was_open && !open && s_wifi_scan_pending) {
         s_wifi_scan_pending = false;
-        kiln_wifi_scan(s_scan_results);
-        wifi_rebuild_dropdown_options(false);
+        kiln_wifi_scan_request_async();
     }
     s_dropdown_was_open = open;
 
     refresh_wifi_labels();
+}
+
+void ui_settings_screen_poll_wifi_scan() {
+    if (!settings_screen)
+        return;
+    if (lv_scr_act() != settings_screen)
+        return;
+    if (!kiln_wifi_take_completed_async_scan(s_scan_results))
+        return;
+    wifi_rebuild_dropdown_options(false);
 }

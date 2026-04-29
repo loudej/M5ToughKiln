@@ -13,7 +13,10 @@ const char KILN_WEB_INDEX_HTML[] = R"--HTML--(
 </head>
 <body>
   <main class="panel">
-    <header class="hdr"><h1>Kiln</h1><span class="unit" id="hdrUnit"></span></header>
+    <header class="hdr">
+    <h1>Kiln</h1>
+    <div class="hdr-side"><a href="/settings" class="hdr-link">Settings</a></div>
+  </header>
 
     <table class="status-table">
       <tr>
@@ -164,6 +167,13 @@ body {
 .status-table .pct {
   font-variant-numeric:tabular-nums;
 }
+.hdr-side { display:flex; align-items:center; gap:10px; }
+.hdr-link {
+  font-size:.85rem; color:#94a3b8;
+  text-decoration:none;
+}
+.hdr-link:hover { color:#f1f5f9; }
+
 .status-table td[colspan="3"] {
   word-break:break-word;
 }
@@ -807,7 +817,6 @@ async function poll() {
 
     if (programSelectionLocked(j)) closeProgPanel();
 
-    document.getElementById('hdrUnit').textContent = j.tempUnit ? ('°' + j.tempUnit) : '';
     document.getElementById('temperature').textContent = j.temperature || '';
 
     const st = document.getElementById('statusLine');
@@ -880,6 +889,146 @@ setInterval(pollTrace, 750);
 })();
 )--JS--";
 
-const size_t KILN_WEB_INDEX_HTML_LEN = sizeof(KILN_WEB_INDEX_HTML) - 1;
-const size_t KILN_WEB_STYLE_CSS_LEN  = sizeof(KILN_WEB_STYLE_CSS) - 1;
-const size_t KILN_WEB_APP_JS_LEN     = sizeof(KILN_WEB_APP_JS) - 1;
+const char KILN_WEB_SETTINGS_HTML[] = R"--SETS--(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Kiln Settings</title>
+  <link rel="stylesheet" href="/style.css"/>
+  <style>
+    .sett-hdr { width:100%; display:flex; align-items:center; gap:12px; margin-bottom:16px; }
+    .sett-back {
+      flex:0 0 auto; border:1px solid #3b4a5c; border-radius:8px;
+      background:#0f1318; color:#f1f5f9; text-decoration:none; padding:8px 14px;
+      font-size:.95rem; font-family:inherit; cursor:pointer;
+    }
+    .sett-hdr h2 { flex:1; margin:0; font-size:1.22rem; text-align:center; font-weight:650; letter-spacing:.02em; }
+    .sett-section { margin-top:8px; }
+    .sett-grid {
+      display:grid;
+      grid-template-columns:auto 1fr;
+      gap:10px 14px;
+      align-items:center;
+    }
+    .sett-grid .sett-units-wrap { justify-self:end; width:100%; max-width:320px;}
+    .sett-grid input.pid-inp {
+      width:100%; max-width:320px; box-sizing:border-box; justify-self:end;
+      border:1px solid #374151; border-radius:6px; background:#101218; color:#f1f5f9;
+      padding:8px 10px; font-size:.95rem; font-family:inherit;
+    }
+    .sett-grid .prog-lbl { margin:0; }
+    .sett-units button {
+      flex:1; padding:10px 12px; border:1px solid #374151; border-radius:8px;
+      background:#101218; color:#f1f5f9; cursor:pointer; font:inherit;
+    }
+    .sett-units button.on {
+      border-color:#3b82f6;
+      background:#1e293b;
+    }
+    .sett-units { display:flex; gap:8px; }
+    .sett-muted { grid-column:1/-1;font-size:.8rem;color:#64748b;margin:4px 0 10px;line-height:1.35; }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <header class="sett-hdr">
+      <a class="sett-back" href="/" id="settBack">&larr; Back</a>
+      <h2>Settings</h2>
+    </header>
+
+    <div class="sett-section">
+      <p class="sett-muted">Leaving empty uses the firmware defaults (shown faded in each box).</p>
+      <div class="sett-grid">
+        <span class="prog-lbl">Temperature unit</span>
+        <div class="sett-units-wrap">
+          <div class="sett-units">
+            <button type="button" id="btnUf">&deg; F</button>
+            <button type="button" id="btnUc">&deg; C</button>
+          </div>
+        </div>
+
+        <span class="prog-lbl">Kp</span>
+        <input id="fldKp" class="pid-inp" type="text" inputmode="decimal" maxlength="24" autocomplete="off"/>
+
+        <span class="prog-lbl">Ki</span>
+        <input id="fldKi" class="pid-inp" type="text" inputmode="decimal" maxlength="24" autocomplete="off"/>
+
+        <span class="prog-lbl">Kd</span>
+        <input id="fldKd" class="pid-inp" type="text" inputmode="decimal" maxlength="24" autocomplete="off"/>
+      </div>
+    </div>
+  </main>
+  <script>
+(function () {
+  function unitFromApi(j) {
+    var s = String(j.tempUnit || 'F').toUpperCase();
+    return (s.charAt(0) === 'C') ? 'C' : 'F';
+  }
+
+  function jsonPidField(el) {
+    var t = el.value.trim();
+    if (!t.length) return null;
+    var v = parseFloat(t.replace(',', '.'));
+    return (Number.isFinite(v) ? v : null);
+  }
+
+  async function pull() {
+    var r = await fetch('/api/settings', { cache: 'no-store' });
+    var j = await r.json();
+    document.getElementById('fldKp').value = (j.kp != null) ? String(j.kp) : '';
+    document.getElementById('fldKi').value = (j.ki != null) ? String(j.ki) : '';
+    document.getElementById('fldKd').value = (j.kd != null) ? String(j.kd) : '';
+    document.getElementById('fldKp').placeholder =
+      (j.kpDefault != null) ? String(j.kpDefault) : '';
+    document.getElementById('fldKi').placeholder =
+      (j.kiDefault != null) ? String(j.kiDefault) : '';
+    document.getElementById('fldKd').placeholder =
+      (j.kdDefault != null) ? String(j.kdDefault) : '';
+    var u = unitFromApi(j);
+    document.getElementById('btnUf').classList.toggle('on', u !== 'C');
+    document.getElementById('btnUc').classList.toggle('on', u === 'C');
+  }
+
+  function selUnit(which) {
+    document.getElementById('btnUf').classList.toggle('on', which === 'F');
+    document.getElementById('btnUc').classList.toggle('on', which === 'C');
+  }
+
+  async function saveThenHome(ev) {
+    if (ev) ev.preventDefault();
+    var u = document.getElementById('btnUc').classList.contains('on') ? 'C' : 'F';
+    var bodyObj = {
+      tempUnit: u,
+      kp: jsonPidField(document.getElementById('fldKp')),
+      ki: jsonPidField(document.getElementById('fldKi')),
+      kd: jsonPidField(document.getElementById('fldKd'))
+    };
+    var r = await fetch('/api/settings/save', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bodyObj),
+    });
+    if (!r.ok) {
+      window.alert('Save failed (' + r.status + ').');
+      return;
+    }
+    window.location.href = '/';
+  }
+
+  document.getElementById('settBack').addEventListener('click', function (e) {
+    saveThenHome(e).catch(console.warn);
+  });
+  document.getElementById('btnUf').addEventListener('click', function () { selUnit('F'); });
+  document.getElementById('btnUc').addEventListener('click', function () { selUnit('C'); });
+  pull().catch(console.warn);
+})();
+  </script>
+</body></html>
+)--SETS--";
+
+const size_t KILN_WEB_INDEX_HTML_LEN   = sizeof(KILN_WEB_INDEX_HTML) - 1;
+const size_t KILN_WEB_STYLE_CSS_LEN    = sizeof(KILN_WEB_STYLE_CSS) - 1;
+const size_t KILN_WEB_APP_JS_LEN       = sizeof(KILN_WEB_APP_JS) - 1;
+const size_t KILN_WEB_SETTINGS_HTML_LEN = sizeof(KILN_WEB_SETTINGS_HTML) - 1;

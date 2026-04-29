@@ -255,6 +255,7 @@ void loop()
     }
 
     kiln_wifi_service();
+    ui_settings_screen_poll_wifi_scan();
 
     kiln_arduino_ota_service();
 

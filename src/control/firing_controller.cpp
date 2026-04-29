@@ -1,6 +1,7 @@
 #include "firing_controller.h"
 #include "../hardware/kiln_sensor_read.h"
 #include "../model/app_state.h"
+#include "../model/kiln_pid_gains.h"
 #include "../model/firing_program.h"
 #include <Arduino.h>
 #include <string>
@@ -308,7 +309,9 @@ void FiringController::updatePID(float setpoint, float currentTemp, uint32_t now
     }
     dFiltered = kDerivativeLpfAlpha * dTerm + (1.f - kDerivativeLpfAlpha) * dFiltered;
 
-    float output = (kp * error) + (ki * errorSum) + (kd * dFiltered);
+    const KilnPidGains pid =
+        kilnMergePidGains(appState.pidOvMask_, appState.pidOv_);
+    float output = (pid.kp * error) + (pid.ki * errorSum) + (pid.kd * dFiltered);
     if (output < kPidOutMin) output = kPidOutMin;
     if (output > kPidOutMax) output = kPidOutMax;
 

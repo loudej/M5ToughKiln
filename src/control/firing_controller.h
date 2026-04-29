@@ -13,12 +13,7 @@ private:
     IKilnHardware* hardware;
     PowerOutput*   powerOutput;
 
-    // Discrete-time PID: output 0–100 (%). Ki integrates ∑(e·dt) in °C·s.
-    // Kd uses derivative-on-measurement: −d(measured temp)/dt (°C/s), avoids
-    // derivative kick on setpoint steps. Retune on hardware as needed.
-    float kp = 0.5f;
-    float ki = 0.015f;
-    float kd = 0.4f;
+    // PID gains (Kp, Ki, Kd) live in `appState` and are editable from settings.
 
     uint32_t lastUpdateMs   = 0;
     float    errorSum       = 0.f;

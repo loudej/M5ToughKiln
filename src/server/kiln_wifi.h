@@ -16,6 +16,13 @@ void kiln_wifi_station_begin_from_nvs();
 /// Same AP may appear multiple times; keep strongest RSSI. Sorted strongest first.
 void kiln_wifi_scan(std::vector<KilnWifiNetwork>& out);
 
+/// Start `WiFi.scanNetworks` in async mode (returns immediately — does not block).
+void kiln_wifi_scan_request_async();
+
+/// After `kiln_wifi_service()` drains the async scan (non-blocking poll), swaps in the
+/// latest result list exactly once until the next scan completes (returns false ifnone).
+bool kiln_wifi_take_completed_async_scan(std::vector<KilnWifiNetwork>& out);
+
 /// Non-blocking: disconnect then join. Saved to NVS when association succeeds.
 void kiln_wifi_request_join(const std::string& ssid, const std::string& pass);
 

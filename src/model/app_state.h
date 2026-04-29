@@ -1,6 +1,7 @@
 #ifndef APP_STATE_H
 #define APP_STATE_H
 
+#include "kiln_pid_gains.h"
 #include "kiln_status.h"
 #include "firing_program.h"
 #include "temp_units.h"
@@ -34,6 +35,9 @@ class AppState {
     std::vector<FiringProgram> customPrograms_{};
     int          activeProgramIndex_{0};
     TempUnit     tempUnit_{TempUnit::FAHRENHEIT};
+    /// Stored override mask (`kPidOvKp`/`kPidOvKi`/`kPidOvKd`). Unset ⇒ use fw default for that term.
+    uint8_t       pidOvMask_{0};
+    KilnPidGains  pidOv_{};
 
     FiringProgram*       mutableActiveProgram();
     const FiringProgram* mutableActiveProgram() const;
@@ -64,6 +68,13 @@ public:
 
     KilnStatus getStatus() const;
     TempUnit   getTempUnit() const;
+
+    /// Effective PID (defaults ∪ NVS overrides), used by the controller.
+    KilnPidGains getPidGains() const;
+    uint8_t      getPidOvMask() const;
+    KilnPidGains getPidOvValues() const;
+    /// Replace override state entirely (clamp each overridden coefficient).
+    void setPidOvState(uint8_t mask, KilnPidGains ovValues);
     int        getActiveProgramIndex() const;
 
     TelemetryView getTelemetryView() const;

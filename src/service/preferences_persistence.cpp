@@ -1,4 +1,5 @@
 #include "preferences_persistence.h"
+#include "../model/kiln_pid_gains.h"
 #include "../model/app_state.h"
 #include "../model/profile_generator.h"
 #include "../model/program_selection_snapshot.h"
@@ -6,6 +7,29 @@
 #include <Arduino.h>
 
 namespace {
+
+void persist_pid_nv_block(Preferences& p, uint8_t mask, const KilnPidGains& ov) {
+    KilnPidGains defs = kilnDefaultPidGains();
+    mask &= (kPidOvKp | kPidOvKi | kPidOvKd);
+    p.putUInt("pid_stor_ver", 2u);
+    p.putUInt("pid_ov", mask);
+    if (mask & kPidOvKp)
+        p.putFloat("pid_o_kp", ov.kp);
+    else
+        p.remove("pid_o_kp");
+    if (mask & kPidOvKi)
+        p.putFloat("pid_o_ki", ov.ki);
+    else
+        p.remove("pid_o_ki");
+    if (mask & kPidOvKd)
+        p.putFloat("pid_o_kd", ov.kd);
+    else
+        p.remove("pid_o_kd");
+    // legacy keys from older builds
+    p.remove("pid_kp");
+    p.remove("pid_ki");
+    p.remove("pid_kd");
+}
 
 void load_previous_snapshot(Preferences& prefs) {
     g_previous_program_index.valid = prefs.getUInt("pv_valid", 0) != 0;
@@ -148,16 +172,57 @@ bool PreferencesPersistence::saveCustomPrograms() {
 
 bool PreferencesPersistence::loadSettings() {
     prefs.begin(NVS_SETTINGS_NAMESPACE, true);
-    int unit = prefs.getInt("temp_unit", 0);
+    const int unit = prefs.getInt("temp_unit", 0);
     appState.setTempUnit((unit == 1) ? TempUnit::CELSIUS : TempUnit::FAHRENHEIT);
+
+    const uint32_t storVer = prefs.getUInt("pid_stor_ver", 0);
+    KilnPidGains   defs    = kilnDefaultPidGains();
+    uint8_t        mask    = 0;
+    KilnPidGains   ov{};
+
+    if (storVer < 2u) {
+        if (prefs.isKey("pid_kp")) {
+            mask |= kPidOvKp;
+            ov.kp = prefs.getFloat("pid_kp", defs.kp);
+        }
+        if (prefs.isKey("pid_ki")) {
+            mask |= kPidOvKi;
+            ov.ki = prefs.getFloat("pid_ki", defs.ki);
+        }
+        if (prefs.isKey("pid_kd")) {
+            mask |= kPidOvKd;
+            ov.kd = prefs.getFloat("pid_kd", defs.kd);
+        }
+    } else {
+        mask =
+            static_cast<uint8_t>(prefs.getUInt("pid_ov", 0) & (kPidOvKp | kPidOvKi | kPidOvKd));
+        if (mask & kPidOvKp)
+            ov.kp = prefs.getFloat("pid_o_kp", defs.kp);
+        if (mask & kPidOvKi)
+            ov.ki = prefs.getFloat("pid_o_ki", defs.ki);
+        if (mask & kPidOvKd)
+            ov.kd = prefs.getFloat("pid_o_kd", defs.kd);
+    }
+
     prefs.end();
+
+    appState.setPidOvState(mask, ov);
+
+    if (storVer < 2u) {
+        prefs.begin(NVS_SETTINGS_NAMESPACE, false);
+        persist_pid_nv_block(prefs, mask, ov);
+        prefs.end();
+    }
     return true;
 }
 
 bool PreferencesPersistence::saveSettings() {
-    const TempUnit u = appState.getTempUnit();
+    const TempUnit       u       = appState.getTempUnit();
+    const uint8_t        mask    = appState.getPidOvMask();
+    const KilnPidGains ov = appState.getPidOvValues();
     prefs.begin(NVS_SETTINGS_NAMESPACE, false);
     prefs.putInt("temp_unit", u == TempUnit::CELSIUS ? 1 : 0);
+    persist_pid_nv_block(prefs, mask, ov);
     prefs.end();
     return true;
 }

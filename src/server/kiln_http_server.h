@@ -12,6 +12,9 @@
 /// POST /api/programs/save — JSON { activeIndex, cone?, candle?, soak? } — applies like device config screen
 /// POST /api/programs/swap-previous — swap with stored previous selection (same as loop button)
 /// GET/POST /update   — OTA firmware upload (ElegantOTA) when Wi-Fi is up
+/// POST /api/settings/save — JSON `{ tempUnit?, kp?, ki?, kd? }` (Wi-Fi unchanged; use device UI).
+/// GET /settings — web UI for those settings only.
+/// GET /api/settings — JSON same fields as saved.
 
 void kiln_http_server_poll();
 

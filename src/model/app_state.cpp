@@ -1,4 +1,5 @@
 #include "app_state.h"
+#include "kiln_pid_gains.h"
 #include "program_selection_snapshot.h"
 #include "profile_generator.h"
 #include "../service/preferences_persistence.h"
@@ -106,6 +107,41 @@ TempUnit AppState::getTempUnit() const {
     TempUnit u = tempUnit_;
     unlockSt();
     return u;
+}
+
+KilnPidGains AppState::getPidGains() const {
+    lockSt();
+    KilnPidGains g = kilnMergePidGains(pidOvMask_, pidOv_);
+    unlockSt();
+    return g;
+}
+
+uint8_t AppState::getPidOvMask() const {
+    lockSt();
+    uint8_t m = pidOvMask_;
+    unlockSt();
+    return m;
+}
+
+KilnPidGains AppState::getPidOvValues() const {
+    lockSt();
+    KilnPidGains v = pidOv_;
+    unlockSt();
+    return v;
+}
+
+void AppState::setPidOvState(uint8_t mask, KilnPidGains ovValues) {
+    mask &= (kPidOvKp | kPidOvKi | kPidOvKd);
+    const KilnPidGains staged = kilnMergePidGains(mask, ovValues);
+    lockSt();
+    pidOvMask_ = mask;
+    if (mask & kPidOvKp)
+        pidOv_.kp = staged.kp;
+    if (mask & kPidOvKi)
+        pidOv_.ki = staged.ki;
+    if (mask & kPidOvKd)
+        pidOv_.kd = staged.kd;
+    unlockSt();
 }
 
 int AppState::getActiveProgramIndex() const {

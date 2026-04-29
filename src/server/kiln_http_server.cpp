@@ -2,6 +2,7 @@
 #include "kiln_dashboard_json.h"
 #include "kiln_chart_trace.h"
 #include "kiln_programs_api.h"
+#include "kiln_settings_api.h"
 #include "kiln_web_assets.h"
 #include "kiln_wifi.h"
 
@@ -239,6 +240,38 @@ static void handle_api_programs_swap() {
     http_log_response(200, sizeof(ok) - 1);
 }
 
+static void handle_settings_page() {
+    http_req_begin();
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "text/html", KILN_WEB_SETTINGS_HTML);
+    http_log_response(200, KILN_WEB_SETTINGS_HTML_LEN);
+}
+
+static void handle_api_settings_get() {
+    http_req_begin();
+    String json;
+    kiln_settings_serialize_json(json);
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", json);
+    http_log_response(200, json.length());
+}
+
+static void handle_api_settings_save() {
+    http_req_begin();
+    String           err;
+    const String body = server.arg("plain");
+    if (!kiln_settings_apply_json(body, err)) {
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(400, "application/json", err);
+        http_log_response(400, err.length());
+        return;
+    }
+    const char ok[] = "{\"ok\":true}";
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", ok);
+    http_log_response(200, sizeof(ok) - 1);
+}
+
 static void handle_not_found() {
     http_req_begin();
     const char msg[] = "Not found";
@@ -257,7 +290,9 @@ static void register_routes() {
     server.on("/api/control/tap", HTTP_POST, handle_api_control_tap);
     server.on("/api/programs", HTTP_GET, handle_api_programs_get);
     server.on("/api/programs/save", HTTP_POST, handle_api_programs_save);
-    server.on("/api/programs/swap-previous", HTTP_POST, handle_api_programs_swap);
+    server.on("/settings", HTTP_GET, handle_settings_page);
+    server.on("/api/settings", HTTP_GET, handle_api_settings_get);
+    server.on("/api/settings/save", HTTP_POST, handle_api_settings_save);
     server.onNotFound(handle_not_found);
     s_routes_registered = true;
 }

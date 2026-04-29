@@ -6,14 +6,27 @@
 #include <algorithm>
 #include <unordered_map>
 
+#ifndef WIFI_SCAN_RUNNING
+#define WIFI_SCAN_RUNNING (-2)
+#endif
+#ifndef WIFI_SCAN_FAILED
+#define WIFI_SCAN_FAILED (-1)
+#endif
+
 extern PreferencesPersistence persistence;
 
 enum class ConnPhase { Idle, Disconnecting, Connecting };
+
+enum class WifiAsyncScanAwait { Idle, WaitingResult };
 
 static ConnPhase     s_phase = ConnPhase::Idle;
 static std::string   s_join_ssid;
 static std::string   s_join_pass;
 static uint32_t      s_phase_ms = 0;
+
+static WifiAsyncScanAwait          s_wifi_async_await       = WifiAsyncScanAwait::Idle;
+static bool                        s_wifi_async_results_ready = false;
+static std::vector<KilnWifiNetwork> s_wifi_async_scratch;
 
 static void dedupe_and_sort(std::vector<KilnWifiNetwork>& nets) {
     std::unordered_map<std::string, int> best;
@@ -50,6 +63,40 @@ static void ensure_sta_mode() {
         WiFi.mode(WIFI_STA);
 }
 
+/** Poll async scan completion; fills `s_wifi_async_scratch` + `ready` flag when done. */
+static void kiln_wifi_drive_async_scan_collect() {
+    if (s_wifi_async_await != WifiAsyncScanAwait::WaitingResult)
+        return;
+
+    const int n = WiFi.scanComplete();
+    if (n == WIFI_SCAN_RUNNING)
+        return;
+
+    /* Finished — success (n≥0), failed (<0 except running), or n==0. */
+    s_wifi_async_await = WifiAsyncScanAwait::Idle;
+
+    s_wifi_async_scratch.clear();
+
+    if (n < 0) {
+        WiFi.scanDelete();
+        return;
+    }
+
+    s_wifi_async_scratch.reserve(static_cast<size_t>(n));
+    for (int i = 0; i < n; ++i) {
+        KilnWifiNetwork row;
+        row.ssid = WiFi.SSID(i).c_str();
+        row.rssi = WiFi.RSSI(i);
+        if (row.ssid.empty())
+            continue;
+        s_wifi_async_scratch.push_back(std::move(row));
+    }
+
+    WiFi.scanDelete();
+    dedupe_and_sort(s_wifi_async_scratch);
+    s_wifi_async_results_ready = true;
+}
+
 void kiln_wifi_scan(std::vector<KilnWifiNetwork>& out) {
     out.clear();
     ensure_sta_mode();
@@ -73,6 +120,33 @@ void kiln_wifi_scan(std::vector<KilnWifiNetwork>& out) {
     dedupe_and_sort(out);
 }
 
+void kiln_wifi_scan_request_async() {
+    ensure_sta_mode();
+    /* Supersede undelivered results from a previous scan (e.g. fast timer retick). */
+    if (s_wifi_async_results_ready) {
+        s_wifi_async_scratch.clear();
+        s_wifi_async_results_ready = false;
+    }
+
+    /* Do not overlap scans — Arduino returns WIFI_SCAN_RUNNING while in flight. */
+    if (WiFi.scanComplete() == WIFI_SCAN_RUNNING)
+        return;
+
+    WiFi.scanDelete();
+
+    WiFi.scanNetworks(/*async*/true, /*show_hidden*/false, /*passive*/false,
+                      /*channel_time_ms_per_chan*/300);
+    s_wifi_async_await = WifiAsyncScanAwait::WaitingResult;
+}
+
+bool kiln_wifi_take_completed_async_scan(std::vector<KilnWifiNetwork>& out) {
+    if (!s_wifi_async_results_ready)
+        return false;
+    out.swap(s_wifi_async_scratch);
+    s_wifi_async_results_ready = false;
+    return true;
+}
+
 void kiln_wifi_request_join(const std::string& ssid, const std::string& pass) {
     if (ssid.empty())
         return;
@@ -84,6 +158,8 @@ void kiln_wifi_request_join(const std::string& ssid, const std::string& pass) {
 }
 
 void kiln_wifi_service() {
+    kiln_wifi_drive_async_scan_collect();
+
     switch (s_phase) {
         case ConnPhase::Disconnecting: {
             wl_status_t st = WiFi.status();

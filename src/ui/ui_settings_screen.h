@@ -9,4 +9,7 @@ lv_obj_t* ui_settings_screen_get();
 /// Refresh read-only Wi-Fi labels when the settings screen is visible (call from main loop).
 void ui_settings_screen_update_status();
 
+/// Apply completed async Wi-Fi scan → dropdown (call shortly after `kiln_wifi_service()`).
+void ui_settings_screen_poll_wifi_scan();
+
 #endif // UI_SETTINGS_SCREEN_H
