@@ -9,6 +9,7 @@
 #include "server/kiln_wifi.h"
 #include "server/kiln_http_server.h"
 #include "server/kiln_arduino_ota.h"
+#include "server/telnet_logger.h"
 #include "ui/ui_settings_screen.h"
 
 #include <Arduino.h>
@@ -181,6 +182,7 @@ void setup()
     app_state_mutex_init();
     M5.begin();
 
+    telnet_logger_setup();   // installs M5.Log callback; server opens when Wi-Fi connects
     M5.Log.println("setup() started");
     lv_init();
 
@@ -239,7 +241,7 @@ void loop()
     lv_timer_handler();
     const uint32_t lv_dt = millis() - lv_t0;
     if (lv_dt >= kLoopSlowWarnMs) {
-        Serial.printf("[UI] lv_timer_handler slow: %lu ms\n", static_cast<unsigned long>(lv_dt));
+        M5.Log.printf("[UI] lv_timer_handler slow: %lu ms\n", static_cast<unsigned long>(lv_dt));
     }
 
     // 3. Update UI at 2Hz to prevent redrawing too often
@@ -249,7 +251,7 @@ void loop()
         ui_settings_screen_update_status();
         const uint32_t ui_dt = millis() - ui_t0;
         if (ui_dt >= kLoopSlowWarnMs) {
-            Serial.printf("[UI] screen updates slow: %lu ms\n", static_cast<unsigned long>(ui_dt));
+            M5.Log.printf("[UI] screen updates slow: %lu ms\n", static_cast<unsigned long>(ui_dt));
         }
         last_ui_update_ms = current_ms;
     }
@@ -257,13 +259,14 @@ void loop()
     kiln_wifi_service();
     ui_settings_screen_poll_wifi_scan();
 
+    telnet_logger_service();
     kiln_arduino_ota_service();
 
     const uint32_t http_t0 = millis();
     kiln_http_server_poll();
     const uint32_t http_dt = millis() - http_t0;
     if (http_dt >= kLoopSlowWarnMs) {
-        Serial.printf("[HTTP] handleClient slow: %lu ms\n", static_cast<unsigned long>(http_dt));
+        M5.Log.printf("[HTTP] handleClient slow: %lu ms\n", static_cast<unsigned long>(http_dt));
     }
 
     delay(5);

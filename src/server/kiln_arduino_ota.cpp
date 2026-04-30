@@ -5,6 +5,7 @@
 
 #include <Arduino.h>
 #include <ArduinoOTA.h>
+#include <M5Unified.h>
 
 void kiln_arduino_ota_service() {
     static bool s_ota_began = false;
@@ -19,14 +20,14 @@ void kiln_arduino_ota_service() {
         // Optional: setPassword and match the OTA env: upload_flags = --auth=...
         ArduinoOTA
             .onStart([]() {
-                Serial.println("[Network OTA] start");
+                M5.Log.println("[Network OTA] start");
             })
             .onEnd([]() {
-                Serial.println("\n[Network OTA] end, rebooting");
+                M5.Log.println("[Network OTA] end, rebooting");
             })
             .onProgress([](unsigned int p, unsigned int t) {
                 if (p == 0U || p == t || (p & 0x1FFFFU) == 0U) {
-                    Serial.printf(" [Network OTA] %u / %u\r", p, t);
+                    M5.Log.printf("[Network OTA] %u / %u\n", p, t);
                 }
             })
             .onError([](ota_error_t e) {
@@ -42,7 +43,7 @@ void kiln_arduino_ota_service() {
                 } else if (e == OTA_END_ERROR) {
                     msg = "end";
                 }
-                Serial.printf("\n[Network OTA] error: %d (%s)\n", static_cast<int>(e), msg);
+                M5.Log.printf("[Network OTA] error: %d (%s)\n", static_cast<int>(e), msg);
             });
         ArduinoOTA.begin();
         s_ota_began = true;
