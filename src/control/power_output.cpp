@@ -1,39 +1,48 @@
 #include "power_output.h"
 #include <M5Unified.h>
 #include <Arduino.h>
+#include <cmath>
+#include <algorithm>
 
 void PowerOutput::setEnabled(bool enabled) {
     if (enabled == _enabled) return;
+
     if (!enabled) {
-        if (_enabled) {
-            const uint32_t now = millis();
-            const uint32_t x   = _lastTransitionMs ? (now - _lastTransitionMs) : 0U;
-            M5.Log.printf("Relay OFF after %u ms for 0 ms (disabled)\n", x);
-        }
-        _enabled = false;
-        _power = 0.0f;
-        _relayOnMs = 0;
-        _windowOnMs = 0;
-        _appliedOn = false;
-        _lastTransitionMs = millis();
+        const uint32_t now = millis();
+        M5.Log.printf("PowerOutput disabled after %u ms (accumulator=%.3f)\n",
+                      _lastTransitionMs ? (now - _lastTransitionMs) : 0u,
+                      _accumulator);
+        _enabled        = false;
+        _power          = 0.0f;
+        _bias           = 1.0f;
+        _effectiveDwell = MIN_DWELL_MS;
+        _accumulator    = 0.0f;
+        _appliedOn    = false;
+        _lastTransitionMs = now;
         _hardware->setRelay(false);
         return;
     }
-    _enabled = true;
-    _power = 0.0f;
-    _relayOnMs = 0;
-    _windowOnMs = 0;
-    _appliedOn = false;
-    _windowStartMs = millis();
-    _lastTransitionMs = _windowStartMs;
+
+    const uint32_t now = millis();
+    _enabled          = true;
+    _power            = 0.0f;
+    _bias             = 1.0f;
+    _effectiveDwell   = MIN_DWELL_MS;
+    _accumulator      = 0.0f;
+    _appliedOn        = false;
+    _lastUpdateMs     = now;
+    _lastTransitionMs = now;
 }
 
 void PowerOutput::setPower(float power) {
     if (!_enabled) return;
     if (power < 0.0f) power = 0.0f;
     if (power > 1.0f) power = 1.0f;
-    _power = power;
-    _relayOnMs = (uint32_t)(_power * WINDOW_MS);
+    _power         = power;
+    _bias          = 1.0f - 2.0f * power;
+    _effectiveDwell = static_cast<uint32_t>(
+        std::max(static_cast<float>(MIN_DWELL_MS),
+                 static_cast<float>(WINDOW_MS) * std::min(power, 1.0f - power)));
 }
 
 void PowerOutput::update() {
@@ -43,39 +52,38 @@ void PowerOutput::update() {
         return;
     }
 
-    uint32_t now = millis();
-    uint32_t elapsed = now - _windowStartMs;
-    if (elapsed >= WINDOW_MS) {
-        _windowStartMs = now;
-        elapsed = 0;
+    const uint32_t now   = millis();
+    const float    dtSec = static_cast<float>(now - _lastUpdateMs) / 1000.0f;
+    _lastUpdateMs = now;
+
+    // Accumulator has two independent contributions each tick:
+    //   Relay state: +1/s when ON, -1/s when OFF
+    //   Demand bias: _bias/s  →  0% power = +1/s, 50% = 0, 100% = -1/s
+    // Combined, drift is zero at steady-state duty = power for any power level.
+    _accumulator += _bias * dtSec;
+    if (_appliedOn) {
+        _accumulator += dtSec;
+    } else {
+        _accumulator -= dtSec;
     }
 
-    //uint32_t wOn = _relayOnMs;
-    //if (wOn > 0 && wOn < MIN_DWELL_MS) wOn = MIN_DWELL_MS;
-    //if (wOn > (WINDOW_MS - MIN_DWELL_MS) && wOn < WINDOW_MS) wOn = WINDOW_MS - MIN_DWELL_MS;
-    _windowOnMs = _relayOnMs;
+    // Check if the accumulator wants a transition.
+    const bool wantOff = _appliedOn  && (_accumulator > 0.0f);
+    const bool wantOn  = !_appliedOn && (_accumulator < 0.0f);
+    if (!wantOff && !wantOn) return;
 
-    const bool shouldBeOn = (_windowOnMs > 0) && (elapsed < _windowOnMs);
+    const uint32_t timeInState = now - _lastTransitionMs;
+    if (timeInState < _effectiveDwell) return;
 
-    if (shouldBeOn == _appliedOn) {
-        return;
-    }
-
-    const uint32_t actualTimeInCurrentState = now - _lastTransitionMs;
-    if (actualTimeInCurrentState < MIN_DWELL_MS) {
-        return;
-    }
-
-    const uint32_t expectedTimeInNewState =
-        shouldBeOn ? ((_windowOnMs > elapsed) ? (_windowOnMs - elapsed) : 0U)
-                   : ((WINDOW_MS > elapsed) ? (WINDOW_MS - elapsed) : 0U);
-    if (expectedTimeInNewState < MIN_DWELL_MS) {
-        return;
-    }
-
-    M5.Log.printf("Relay %s after %u ms for %u ms\n",
-                  shouldBeOn ? "ON" : "OFF", actualTimeInCurrentState, expectedTimeInNewState);
-    _hardware->setRelay(shouldBeOn);
-    _appliedOn = shouldBeOn;
+    // Transition.
+    _appliedOn        = wantOn;
     _lastTransitionMs = now;
+    _hardware->setRelay(_appliedOn);
+
+    M5.Log.printf("Relay %s after %u ms (power=%.2f accumulator=%.3f dwell=%u ms)\n",
+                  _appliedOn ? "ON" : "OFF",
+                  timeInState,
+                  _power,
+                  _accumulator,
+                  _effectiveDwell);
 }
