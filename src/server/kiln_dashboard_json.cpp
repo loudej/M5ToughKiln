@@ -2,6 +2,7 @@
 #include "../model/app_state.h"
 #include "../model/firing_program.h"
 #include "../model/kiln_status.h"
+#include "../model/kiln_pid_gains.h"
 #include "../model/profile_generator.h"
 #include "../model/program_selection_snapshot.h"
 #include "../model/temp_units.h"
@@ -211,6 +212,21 @@ void kiln_dashboard_serialize_status(String& out) {
     doc["kilnState"]    = kilnStateJsonKey(tv.status.currentState);
     doc["powerPercent"] = static_cast<int>(tv.status.power * 100.f + 0.5f);
     doc["traceRevision"] = ui_profile_chart_trace_revision();
+
+    {
+        const KilnPidGains gains = appState.getPidGains();
+        JsonObject settings      = doc["settings"].to<JsonObject>();
+        settings["kp"] = gains.kp;
+        settings["ki"] = gains.ki;
+        settings["kd"] = gains.kd;
+    }
+
+    {
+        JsonObject pid = doc["pid"].to<JsonObject>();
+        pid["p"] = tv.status.pidTermP;
+        pid["i"] = tv.status.pidTermI;
+        pid["d"] = tv.status.pidTermD;
+    }
 
     JsonObject bars = doc["bars"].to<JsonObject>();
 

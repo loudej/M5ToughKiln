@@ -1,0 +1,99 @@
+rest:
+  - resource: http://192.168.4.151/api/status
+    scan_interval: 30
+    sensor:
+      # --- Status & Program ---
+      - name: "Kiln Status"
+        value_template: "{{ value_json.statusText }}"
+        icon: mdi:fire
+
+      - name: "Kiln Program"
+        value_template: "{{ value_json.programName }}"
+        icon: mdi:pottery
+
+      # --- Temperature Data ---
+      - name: "Kiln Actual Temperature"
+        value_template: "{{ value_json.chart.actualTempC | round(1) }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+
+      - name: "Kiln Scheduled Temperature"
+        value_template: "{{ value_json.chart.targetTempC | round(1) }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+
+      - name: "Kiln Final Target"
+        value_template: "{{ value_json.chart.scheduleEndC | round(1) }}"
+        unit_of_measurement: "°C"
+        device_class: temperature
+        state_class: measurement
+
+      # --- Power & Progress ---
+      - name: "Kiln Power Level"
+        value_template: "{{ value_json.powerPercent }}"
+        unit_of_measurement: "%"
+        icon: mdi:flash
+
+      # --- PID Gains (effective, after overrides) ---
+      - name: "Kiln PID Kp"
+        value_template: "{{ value_json.settings.kp }}"
+        icon: mdi:alpha-p-circle-outline
+
+      - name: "Kiln PID Ki"
+        value_template: "{{ value_json.settings.ki }}"
+        icon: mdi:alpha-i-circle-outline
+
+      - name: "Kiln PID Kd"
+        value_template: "{{ value_json.settings.kd }}"
+        icon: mdi:alpha-d-circle-outline
+
+      # --- PID Term Contributions (output % units, pre-clamp) ---
+      - name: "Kiln PID P Term"
+        value_template: "{{ value_json.pid.p | round(2) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:alpha-p-circle
+
+      - name: "Kiln PID I Term"
+        value_template: "{{ value_json.pid.i | round(2) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:alpha-i-circle
+
+      - name: "Kiln PID D Term"
+        value_template: "{{ value_json.pid.d | round(2) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+        icon: mdi:alpha-d-circle
+
+      - name: "Kiln Program Progress"
+        value_template: >
+          {% set total = value_json.chart.scheduleEndSec | float %}
+          {% set elapsed = value_json.chart.elapsedSec | float %}
+          {% if total > 0 %}
+            {{ ((elapsed / total) * 100) | round(1) }}
+          {% else %}
+            0
+          {% endif %}
+        unit_of_measurement: "%"
+        icon: mdi:chart-line
+
+      # --- Time Calculations ---
+      - name: "Kiln Time Remaining"
+        value_template: >
+          {% set remaining = value_json.chart.scheduleEndSec | int - value_json.chart.elapsedSec | int %}
+          {{ [remaining, 0] | max }}
+        unit_of_measurement: "s"
+        icon: mdi:timer-sand
+
+      - name: "Kiln Estimated Finish"
+        device_class: timestamp
+        value_template: >
+          {% set remaining = value_json.chart.scheduleEndSec | int - value_json.chart.elapsedSec | int %}
+          {% if remaining > 0 %}
+            {{ (now() + timedelta(seconds=remaining)).isoformat() }}
+          {% else %}
+            unknown
+          {% endif %}

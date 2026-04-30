@@ -1,0 +1,113 @@
+type: sections
+max_columns: 4
+title: Kiln
+path: kiln
+icon: mdi:heating-coil
+sections:
+  - type: grid
+    cards:
+      - type: heading
+        heading: Current Status
+      - type: tile
+        entity: sensor.kiln_program
+        name: Active Program
+        icon: mdi:script-text-outline
+      - type: tile
+        entity: sensor.kiln_estimated_finish
+        name: Estimated Finish
+        icon: mdi:clock-check
+      - type: tile
+        entity: sensor.kiln_status
+        name: Operating State
+        color: orange
+        icon: mdi:fire
+      - type: tile
+        entity: sensor.kiln_power_level
+        vertical: false
+        features_position: bottom
+      - type: gauge
+        entity: sensor.kiln_actual_temperature
+        name: Internal Temp
+        min: 32
+        max: 2300
+        needle: true
+        severity:
+          green: 212
+          yellow: 1000
+          red: 1728
+      - type: history-graph
+        entities:
+          - entity: sensor.kiln_actual_temperature
+            name: Actual
+          - entity: sensor.kiln_scheduled_temperature
+            name: Scheduled
+          - entity: sensor.kiln_final_target
+            name: Target
+        hours_to_show: 12
+  - type: grid
+    cards:
+      - type: heading
+        heading: Progress & Power
+      - type: gauge
+        entity: sensor.kiln_program_progress
+        name: Completion
+        unit: "%"
+        grid_options:
+          columns: 6
+          rows: 2
+      - type: gauge
+        entity: sensor.kiln_power_level
+        name: Current Power
+        unit: "%"
+        severity:
+          green: 0
+          yellow: 60
+          red: 90
+        grid_options:
+          columns: 6
+          rows: 2
+      - type: history-graph
+        entities:
+          - entity: sensor.kiln_power_level
+        min_y_axis: 0
+        max_y_axis: 100
+        hours_to_show: 12
+  - type: grid
+    cards:
+      - type: heading
+        heading: PID Tuning
+      - type: entities
+        entities:
+          - entity: sensor.kiln_scheduled_temperature
+          - entity: sensor.kiln_actual_temperature
+          - entity: sensor.kiln_power_level
+          - entity: sensor.kiln_pid_p_term
+          - entity: sensor.kiln_pid_i_term
+          - entity: sensor.kiln_pid_d_term
+          - entity: sensor.kiln_pid_kp
+          - entity: sensor.kiln_pid_ki
+          - entity: sensor.kiln_pid_kd
+  - type: grid
+    cards:
+      - type: heading
+        heading: PID Term Contributions
+        heading_style: title
+      - type: history-graph
+        entities:
+          - entity: sensor.kiln_power_level
+            name: Output
+          - entity: sensor.kiln_pid_p_term
+            name: P
+          - entity: sensor.kiln_pid_i_term
+            name: I
+          - entity: sensor.kiln_pid_d_term
+            name: D
+          - entity: sensor.kiln_actual_temperature
+            name: Actual
+          - entity: sensor.kiln_scheduled_temperature
+            name: Scheduled
+        grid_options:
+          columns: 12
+          rows: 8
+        hours_to_show: 1
+cards: []

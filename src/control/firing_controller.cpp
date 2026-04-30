@@ -316,12 +316,18 @@ void FiringController::updatePID(float setpoint, float currentTemp, uint32_t now
 
     const KilnPidGains pid =
         kilnMergePidGains(appState.pidOvMask_, appState.pidOv_);
-    float output = (pid.kp * error) + (pid.ki * errorSum) + (pid.kd * dFiltered);
+    const float pTerm    = pid.kp * error;
+    const float iTerm    = pid.ki * errorSum;
+    const float dTermOut = pid.kd * dFiltered;
+    float output = pTerm + iTerm + dTermOut;
     if (output < kPidOutMin) output = kPidOutMin;
     if (output > kPidOutMax) output = kPidOutMax;
 
     powerOutput->setPower(output / 100.f);
 
-    lastTemp               = currentTemp;
-    appState.status_.power = output / 100.f;
+    lastTemp                    = currentTemp;
+    appState.status_.power      = output / 100.f;
+    appState.status_.pidTermP   = pTerm;
+    appState.status_.pidTermI   = iTerm;
+    appState.status_.pidTermD   = dTermOut;
 }

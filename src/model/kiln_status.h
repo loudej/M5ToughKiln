@@ -32,6 +32,13 @@ struct KilnStatus {
     uint32_t segmentTimeElapsed = 0;
     uint32_t totalTimeElapsed   = 0;  // seconds — used by UI for elapsed/remaining/bar
     float    power              = 0.0f;  // 0.0–1.0, current PID output effort
+
+    /// Individual PID term contributions (in output % units, same scale as power×100).
+    /// Updated every controller tick; zero when idle.
+    float    pidTermP           = 0.0f;
+    float    pidTermI           = 0.0f;
+    float    pidTermD           = 0.0f;
+
     std::string activeProgramName = "None";
 
     /// Set once when the firing controller enters ERROR; cleared on IDLE. Live sensor
