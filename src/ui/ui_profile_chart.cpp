@@ -9,21 +9,29 @@
 #include <cstdint>
 #include <vector>
 
-// Actual / power history (same file Tu as chart; exported to web trace API).
-static std::vector<int32_t> g_act_x;
-static std::vector<int32_t> g_act_y;
-static std::vector<int32_t> g_pwr_x;
-static std::vector<int32_t> g_pwr_y;
+// Actual / power history — fixed-size min/max bucket buffer.
+// When full, adjacent pairs are merged and resolution doubles; old data is never thrown away,
+// just progressively coarsened uniformly across the whole history.
+struct TraceSlot {
+    int32_t t_sec;   ///< Bucket start time (seconds since program arm)
+    int16_t hi_tc;   ///< Max temperature in bucket (°C × 10)
+    int16_t lo_tc;   ///< Min temperature in bucket (°C × 10)
+    uint8_t pwr_hi;  ///< Max power% in bucket (0–100)
+    uint8_t pwr_lo;  ///< Min power% in bucket (0–100)
+};
+
+static constexpr size_t kTraceCapacity = 200;
+static TraceSlot g_trace[kTraceCapacity];
+static size_t    g_trace_count      = 0;
+static int32_t   g_trace_resolution = 1; // seconds per bucket; doubles on each merge
 
 static uint32_t g_trace_revision = 1;
 static void     bump_trace_revision() { ++g_trace_revision; }
 
 static void clear_actual_power_trace() {
     bump_trace_revision();
-    g_act_x.clear();
-    g_act_y.clear();
-    g_pwr_x.clear();
-    g_pwr_y.clear();
+    g_trace_count      = 0;
+    g_trace_resolution = 1;
 }
 
 namespace {
@@ -33,7 +41,7 @@ constexpr float ROOM_TEMP_C = (70.0f - 32.0f) * 5.0f / 9.0f;
 /// Y values are stored as °C × 10 (int32) for LVGL chart resolution.
 constexpr int32_t kYScale = 10;
 
-constexpr uint32_t kMaxChartPoints = 400;
+constexpr uint32_t kMaxChartPoints = 200;
 
 lv_obj_t*       g_wrap{};
 lv_obj_t*       g_chart{};
@@ -176,7 +184,7 @@ static void draw_marker_ring(lv_layer_t* layer, int32_t cx, int32_t cy, int32_t 
 static void chart_power_mountain_on_event(lv_event_t* e) {
     if (lv_event_get_code(e) != LV_EVENT_DRAW_MAIN)
         return;
-    if (!g_chart || g_pwr_x.empty())
+    if (!g_chart || g_trace_count == 0)
         return;
 
     lv_layer_t* layer = lv_event_get_layer(e);
@@ -233,22 +241,19 @@ static void chart_power_mountain_on_event(lv_event_t* e) {
         lv_draw_triangle(layer, &td);
     };
 
-    // Only one elapsed-second bucket yet (common in the first ~1s): span one second on the X axis.
-    if (g_pwr_x.size() == 1) {
-        const int32_t xs = g_pwr_x[0];
-        const int32_t x0 = map_x(xs);
-        const int32_t x1 = map_x(xs + 1);
-        const int32_t y0 = map_y_pct(g_pwr_y[0]);
+    if (g_trace_count == 1) {
+        const int32_t x0 = map_x(g_trace[0].t_sec);
+        const int32_t x1 = map_x(g_trace[0].t_sec + g_trace_resolution);
+        const int32_t y0 = map_y_pct(g_trace[0].pwr_hi);
         draw_quad(x0, x1, y0, y0);
         return;
     }
 
-    for (size_t i = 0; i + 1 < g_pwr_x.size(); ++i) {
-        const int32_t x0 = map_x(g_pwr_x[i]);
-        const int32_t x1 = map_x(g_pwr_x[i + 1]);
-        const int32_t y0 = map_y_pct(g_pwr_y[i]);
-        const int32_t y1 = map_y_pct(g_pwr_y[i + 1]);
-
+    for (size_t i = 0; i + 1 < g_trace_count; ++i) {
+        const int32_t x0 = map_x(g_trace[i].t_sec);
+        const int32_t x1 = map_x(g_trace[i + 1].t_sec);
+        const int32_t y0 = map_y_pct(g_trace[i].pwr_hi);
+        const int32_t y1 = map_y_pct(g_trace[i + 1].pwr_hi);
         draw_quad(x0, x1, y0, y1);
     }
 }
@@ -362,7 +367,7 @@ void ui_profile_chart_create(lv_obj_t* grid_parent) {
     lv_obj_set_style_height(g_chart, 0, LV_PART_INDICATOR);
 
     lv_chart_set_type(g_chart, LV_CHART_TYPE_SCATTER);
-    lv_chart_set_point_count(g_chart, kMaxChartPoints);
+    lv_chart_set_point_count(g_chart, static_cast<uint32_t>(kTraceCapacity));
     lv_chart_set_update_mode(g_chart, LV_CHART_UPDATE_MODE_CIRCULAR);
 
     g_ser_program = lv_chart_add_series(g_chart, lv_palette_main(LV_PALETTE_BLUE_GREY), LV_CHART_AXIS_PRIMARY_Y);
@@ -458,63 +463,56 @@ void ui_profile_chart_update() {
     if (recording_trace) {
         const uint32_t elapsed = tv.status.totalTimeElapsed;
         const int32_t  cur_x   = static_cast<int32_t>(elapsed);
-        const int32_t  cur_y =
-            static_cast<int32_t>(tv.status.currentTemperature * static_cast<float>(kYScale));
+        const int16_t  cur_tc  = static_cast<int16_t>(LV_CLAMP(
+            -32767, static_cast<int32_t>(tv.status.currentTemperature * static_cast<float>(kYScale)), 32767));
+        const uint8_t  p_pct   = static_cast<uint8_t>(
+            LV_CLAMP(0, static_cast<int32_t>(tv.status.power * 100.f + 0.5f), 100));
 
-        if (g_act_x.empty() || g_act_x.back() != cur_x) {
-            const int32_t p_pct =
-                LV_CLAMP(0, static_cast<int32_t>(tv.status.power * 100.f + 0.5f), 100);
-            g_act_x.push_back(cur_x);
-            g_act_y.push_back(cur_y);
-            g_pwr_x.push_back(cur_x);
-            g_pwr_y.push_back(p_pct);
-            bool decimated = false;
-            while (g_act_x.size() > 280) {
-                decimated = true;
-                std::vector<int32_t> nx, ny, px, py;
-                nx.reserve(g_act_x.size() / 2 + 1);
-                ny.reserve(g_act_y.size() / 2 + 1);
-                px.reserve(g_pwr_x.size() / 2 + 1);
-                py.reserve(g_pwr_y.size() / 2 + 1);
-                nx.push_back(g_act_x.front());
-                ny.push_back(g_act_y.front());
-                px.push_back(g_pwr_x.front());
-                py.push_back(g_pwr_y.front());
-                for (size_t i = 2; i < g_act_x.size(); i += 2) {
-                    nx.push_back(g_act_x[i]);
-                    ny.push_back(g_act_y[i]);
-                    px.push_back(g_pwr_x[i]);
-                    py.push_back(g_pwr_y[i]);
-                }
-                nx.push_back(g_act_x.back());
-                ny.push_back(g_act_y.back());
-                px.push_back(g_pwr_x.back());
-                py.push_back(g_pwr_y.back());
-                g_act_x.swap(nx);
-                g_act_y.swap(ny);
-                g_pwr_x.swap(px);
-                g_pwr_y.swap(py);
-            }
-            if (decimated)
-                bump_trace_revision();
+        if (g_trace_count == 0) {
+            g_trace[0]    = { cur_x, cur_tc, cur_tc, p_pct, p_pct };
+            g_trace_count = 1;
         } else {
-            const int32_t p_pct =
-                LV_CLAMP(0, static_cast<int32_t>(tv.status.power * 100.f + 0.5f), 100);
-            g_act_y.back() = cur_y;
-            g_pwr_y.back() = p_pct;
+            TraceSlot& tail = g_trace[g_trace_count - 1];
+            if (cur_x - tail.t_sec < g_trace_resolution) {
+                // Still within the current bucket's time window — update min/max in-place.
+                if (cur_tc  > tail.hi_tc)  tail.hi_tc  = cur_tc;
+                if (cur_tc  < tail.lo_tc)  tail.lo_tc  = cur_tc;
+                if (p_pct   > tail.pwr_hi) tail.pwr_hi = p_pct;
+                if (p_pct   < tail.pwr_lo) tail.pwr_lo = p_pct;
+            } else {
+                // Start a new bucket. Merge-halve first if the buffer is full.
+                if (g_trace_count == kTraceCapacity) {
+                    const size_t half = kTraceCapacity / 2;
+                    for (size_t i = 0; i < half; ++i) {
+                        const TraceSlot& a = g_trace[2 * i];
+                        const TraceSlot& b = g_trace[2 * i + 1];
+                        g_trace[i] = {
+                            a.t_sec,
+                            static_cast<int16_t>(std::max(a.hi_tc,  b.hi_tc)),
+                            static_cast<int16_t>(std::min(a.lo_tc,  b.lo_tc)),
+                            std::max(a.pwr_hi, b.pwr_hi),
+                            std::min(a.pwr_lo, b.pwr_lo)
+                        };
+                    }
+                    g_trace_count      = half;
+                    g_trace_resolution *= 2;
+                    bump_trace_revision();
+                }
+                g_trace[g_trace_count++] = { cur_x, cur_tc, cur_tc, p_pct, p_pct };
+            }
         }
 
-        for (size_t i = 0; i < g_act_x.size(); ++i) {
-            ymin_c = std::min(ymin_c, g_act_y[i]);
-            ymax_c = std::max(ymax_c, g_act_y[i]);
+        for (size_t i = 0; i < g_trace_count; ++i) {
+            ymin_c = std::min(ymin_c, static_cast<int32_t>(g_trace[i].lo_tc));
+            ymax_c = std::max(ymax_c, static_cast<int32_t>(g_trace[i].hi_tc));
         }
         xmax_sec = std::max(xmax_sec, cur_x + 1);
-    } else if (!g_act_x.empty()) {
-        for (size_t i = 0; i < g_act_x.size(); ++i) {
-            ymin_c = std::min(ymin_c, g_act_y[i]);
-            ymax_c = std::max(ymax_c, g_act_y[i]);
+    } else if (g_trace_count > 0) {
+        for (size_t i = 0; i < g_trace_count; ++i) {
+            ymin_c = std::min(ymin_c, static_cast<int32_t>(g_trace[i].lo_tc));
+            ymax_c = std::max(ymax_c, static_cast<int32_t>(g_trace[i].hi_tc));
         }
-        xmax_sec = std::max(xmax_sec, g_act_x.back());
+        xmax_sec = std::max(xmax_sec, g_trace[g_trace_count - 1].t_sec);
     }
 
     const int32_t tgt_centi_idle =
@@ -522,11 +520,10 @@ void ui_profile_chart_update() {
     ymin_c = std::min(ymin_c, tgt_centi_idle);
     ymax_c = std::max(ymax_c, tgt_centi_idle);
 
-    const uint32_t n_prog = static_cast<uint32_t>(g_prog_x.size());
-    const uint32_t n_act  = static_cast<uint32_t>(g_act_x.size());
-    const uint32_t n_pwr  = static_cast<uint32_t>(g_pwr_x.size());
-    uint32_t       need   = std::max({n_prog, n_act, n_pwr, 32u});
-    need                  = std::min(need, kMaxChartPoints);
+    const uint32_t n_prog  = static_cast<uint32_t>(g_prog_x.size());
+    const uint32_t n_trace = static_cast<uint32_t>(g_trace_count);
+    uint32_t       need    = std::max({n_prog, n_trace, 32u});
+    need                   = std::min(need, kMaxChartPoints);
 
     if (lv_chart_get_point_count(g_chart) != need)
         lv_chart_set_point_count(g_chart, need);
@@ -536,11 +533,14 @@ void ui_profile_chart_update() {
     for (uint32_t i = 0; i < n_prog && i < need; ++i)
         lv_chart_set_series_value_by_id2(g_chart, g_ser_program, i, g_prog_x[i], g_prog_y[i]);
 
-    for (uint32_t i = 0; i < n_act && i < need; ++i)
-        lv_chart_set_series_value_by_id2(g_chart, g_ser_actual, i, g_act_x[i], g_act_y[i]);
+    for (uint32_t i = 0; i < n_trace && i < need; ++i) {
+        const int32_t mid_tc = (static_cast<int32_t>(g_trace[i].hi_tc) + static_cast<int32_t>(g_trace[i].lo_tc)) / 2;
+        lv_chart_set_series_value_by_id2(g_chart, g_ser_actual, i, g_trace[i].t_sec, mid_tc);
+    }
 
-    for (uint32_t i = 0; i < n_pwr && i < need && g_ser_power; ++i)
-        lv_chart_set_series_value_by_id2(g_chart, g_ser_power, i, g_pwr_x[i], g_pwr_y[i]);
+    for (uint32_t i = 0; i < n_trace && i < need && g_ser_power; ++i)
+        lv_chart_set_series_value_by_id2(g_chart, g_ser_power, i, g_trace[i].t_sec,
+                                          static_cast<int32_t>(g_trace[i].pwr_hi));
 
     apply_axes(xmax_sec, ymin_c, ymax_c);
     lv_chart_refresh(g_chart);
@@ -554,15 +554,16 @@ uint32_t ui_profile_chart_trace_revision() {
 }
 
 size_t ui_profile_chart_trace_points() {
-    return g_act_x.size();
+    return g_trace_count;
 }
 
 bool ui_profile_chart_trace_point(size_t i, int32_t* t_sec, float* temp_celsius, int* power_pct) {
-    if (!t_sec || !temp_celsius || !power_pct || i >= g_act_x.size())
+    if (!t_sec || !temp_celsius || !power_pct || i >= g_trace_count)
         return false;
     constexpr float kDegScale = 10.f;
-    *t_sec          = g_act_x[i];
-    *temp_celsius   = static_cast<float>(g_act_y[i]) / kDegScale;
-    *power_pct      = static_cast<int>(g_pwr_y[i]);
+    *t_sec        = g_trace[i].t_sec;
+    *temp_celsius = (static_cast<float>(g_trace[i].hi_tc) + static_cast<float>(g_trace[i].lo_tc))
+                    / 2.f / kDegScale;
+    *power_pct    = static_cast<int>(g_trace[i].pwr_hi);
     return true;
 }
