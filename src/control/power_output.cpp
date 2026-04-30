@@ -39,7 +39,7 @@ void PowerOutput::setPower(float power) {
     if (power < 0.0f) power = 0.0f;
     if (power > 1.0f) power = 1.0f;
     _power         = power;
-    _bias          = 1.0f - 2.0f * power;
+    _bias          = 0.5f - power;
     _effectiveDwell = static_cast<uint32_t>(
         std::max(static_cast<float>(MIN_DWELL_MS),
                  static_cast<float>(WINDOW_MS) * std::min(power, 1.0f - power)));
@@ -62,9 +62,9 @@ void PowerOutput::update() {
     // Combined, drift is zero at steady-state duty = power for any power level.
     _accumulator += _bias * dtSec;
     if (_appliedOn) {
-        _accumulator += dtSec;
+        _accumulator += dtSec / 2;
     } else {
-        _accumulator -= dtSec;
+        _accumulator -= dtSec / 2;
     }
 
     // Check if the accumulator wants a transition.
