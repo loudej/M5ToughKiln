@@ -23,18 +23,21 @@ private:
     bool     pidHasPrevious = false;
     bool     pidTimeValid   = false;
 
-    uint32_t programStartMs    = 0;
+    uint32_t programStartMs    = 0;  // millis() value when arm ran (always = arm-time now)
     uint32_t segmentStartMs    = 0;
     int      currentSegmentIdx = 0;
     float    segmentStartTemp  = 25.0f;
+    /// Schedule seconds already elapsed at arm time (from alignedSetpointC alignment).
+    /// totalTimeElapsed = armElapsedSec_ + (now - programStartMs) / kMsPerSecond.
+    /// This decouples the display clock from millis() uptime so a reboot mid-firing
+    /// still shows the correct elapsed time rather than near-zero.
+    uint32_t armElapsedSec_    = 0;
 
     uint16_t consecutiveSensorFailures = 0;
 
     void enterErrorState(std::string message);
-    void setStateForActiveRampPhase(float from, float to);
 
     void armPowerIfNeeded(uint32_t now);
-    void fastForwardCompletedRampPhases(uint32_t now, FiringProgram* prog);
     void applyTelemetryAndPid(uint32_t now, float setpoint);
     void processSegment(uint32_t now);
     void updatePID(float setpoint, float currentTemp, uint32_t now);

@@ -2,7 +2,19 @@
 #define PROFILE_GENERATOR_H
 
 #include "firing_program.h"
+#include "kiln_status.h"
+
 #include <string>
+
+struct ScheduleArmAlignment {
+    bool      ok                          = false;
+    int       segmentIndex                = 0;
+    /// Setpoint (°C) at the alignment intersection — used directly as segmentStartTemp.
+    float     alignedSetpointC            = 21.1f;
+    /// Total schedule minutes from program X=0 to the alignment point — for the display clock only.
+    float     scheduleElapsedMinutesTotal = 0.f;
+    KilnState initialState                = KilnState::RAMPING;
+};
 
 class ProfileGenerator {
 public:
@@ -22,6 +34,17 @@ public:
 
     // Estimate total firing time in minutes given a starting temperature in °C.
     static float estimateTotalMinutes(const FiringProgram& prog, float startTempC);
+
+    /// Find where measuredC sits on the piecewise schedule (X = minutes, Y = °C).
+    /// Walks segments in order; skips any segment whose target is clearly behind measuredC
+    /// (in the direction of travel); stops at the first ramp leg that contains measuredC.
+    /// Returns:
+    ///   alignedSetpointC            — the schedule temperature at the intersection point
+    ///   scheduleElapsedMinutesTotal — total elapsed minutes to that point (display only)
+    ///   initialState                — RAMPING or COOLING (never SOAKING)
+    static ScheduleArmAlignment alignArmScheduleToMeasured(const FiringProgram& prog,
+                                                            float measuredC,
+                                                            float startTempC);
 
 private:
     // Parse an Orton cone string to an integer (e.g., "04" → -4, "6" → 6).

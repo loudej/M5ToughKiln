@@ -1,5 +1,7 @@
 #include "profile_generator.h"
+
 #include <cstdlib>
+#include <algorithm>
 #include <cmath>
 
 // ── Cone helpers ────────────────────────────────────────────────────────────
@@ -150,4 +152,85 @@ float ProfileGenerator::estimateTotalMinutes(const FiringProgram& prog, float st
         prevTemp = seg.targetTemperature;
     }
     return totalMinutes;
+}
+
+ScheduleArmAlignment ProfileGenerator::alignArmScheduleToMeasured(const FiringProgram& prog,
+                                                                  float measuredC,
+                                                                  float startTempC) {
+    // The program is a piecewise 2D schedule: X = minutes, Y = °C.
+    // Each segment has a ramp leg (slope = rampRate °C/h) then a flat soak leg (soakTime minutes).
+    //
+    // We walk segments from the beginning. For each segment:
+    //   - If measuredC is clearly past the segment's target (in the direction of travel),
+    //     accumulate the segment's ramp + soak time and continue to the next segment.
+    //   - Otherwise measuredC sits on (or before) this ramp leg: interpolate to find the
+    //     exact intersection, and return.
+    //
+    // The returned alignedSetpointC is the Y value at the intersection.
+    // The controller sets segmentStartTemp = alignedSetpointC, segmentStartMs = now, so
+    // the ramp continues forward from the aligned temperature at the correct rate.
+
+    ScheduleArmAlignment out{};
+    if (prog.segments.empty())
+        return out;
+
+    constexpr float kBandC   = 2.5f;   // ±°C: "at or past target" tolerance
+    constexpr float kEpsTemp = 1e-3f;  // ΔT below this is a flat/degenerate segment
+    constexpr float kEpsRate = 1e-9f;  // rampRate below this treated as zero
+
+    float accumMins = 0.f;  // total schedule minutes for all skipped segments so far
+    float fromY     = startTempC;
+
+    const int n = static_cast<int>(prog.segments.size());
+
+    for (int i = 0; i < n; ++i) {
+        const FiringSegment& seg = prog.segments[static_cast<size_t>(i)];
+        const float toY = seg.targetTemperature;
+        const float dY  = toY - fromY;
+
+        const bool heating = dY >  kEpsTemp;
+        const bool cooling = dY < -kEpsTemp;
+
+        // Duration of this segment's ramp leg (0 for flat or zero-rate segments).
+        const float rampMins = (heating || cooling) && seg.rampRate > kEpsRate
+                               ? std::fabs(dY) / seg.rampRate * 60.f
+                               : 0.f;
+
+        // "Past target" means the kiln has already gone through this segment's target
+        // in the direction of travel — both the ramp and the soak are behind us.
+        const bool pastTarget = heating ? (measuredC > toY + kBandC)
+                              : cooling ? (measuredC < toY - kBandC)
+                                        : (std::fabs(measuredC - toY) > kBandC);
+
+        if (pastTarget) {
+            accumMins += rampMins + static_cast<float>(seg.soakTime);
+            fromY = toY;
+            continue;
+        }
+
+        // measuredC is on or before this segment's target.
+        // Interpolate position u ∈ [0, 1] along the ramp leg.
+        // For flat or zero-rate segments u = 0 (aligned at the ramp start).
+        float u = 0.f;
+        if ((heating || cooling) && rampMins > 0.f) {
+            u = (measuredC - fromY) / dY;
+            if (u < 0.f) u = 0.f;
+            if (u > 1.f) u = 1.f;
+        }
+
+        out.ok                          = true;
+        out.segmentIndex                = i;
+        out.alignedSetpointC            = fromY + u * dY;
+        out.scheduleElapsedMinutesTotal = accumMins + u * rampMins;
+        out.initialState                = cooling ? KilnState::COOLING : KilnState::RAMPING;
+        return out;
+    }
+
+    // measuredC is past every segment — program is complete.
+    out.ok                          = true;
+    out.segmentIndex                = n;  // >= segments.size() signals DONE to the controller
+    out.alignedSetpointC            = prog.segments.back().targetTemperature;
+    out.scheduleElapsedMinutesTotal = estimateTotalMinutes(prog, startTempC);
+    out.initialState                = KilnState::RAMPING;
+    return out;
 }
