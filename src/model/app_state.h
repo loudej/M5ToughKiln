@@ -92,6 +92,8 @@ public:
 
     /// Main screen START / STOP / RESET tap (same semantics as previous inline logic).
     void applyStartStopTap();
+    /// Latches ERROR state and message if not already in ERROR.
+    void latchError(std::string message);
 
     void setPredefinedProgram(size_t idx, FiringProgram prog);
     void appendCustomProgram(FiringProgram prog);

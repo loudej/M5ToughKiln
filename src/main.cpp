@@ -5,6 +5,7 @@
 #include "hardware/kiln_hardware.h"
 #include "control/power_output.h"
 #include "control/firing_controller.h"
+#include "control/kiln_supervisor.h"
 #include "service/preferences_persistence.h"
 #include "server/kiln_wifi.h"
 #include "server/kiln_http_server.h"
@@ -105,6 +106,7 @@ static lv_indev_t *indev;
 static KMeterISOHardware hardware;
 static PowerOutput       powerOutput(&hardware);
 static FiringController  controller(&hardware, &powerOutput);
+static KilnSupervisor    supervisor;
 PreferencesPersistence persistence;
 
 static void controller_task(void* param) {
@@ -258,6 +260,7 @@ void loop()
 
     kiln_wifi_service();
     ui_settings_screen_poll_wifi_scan();
+    supervisor.service();
 
     telnet_logger_service();
     kiln_arduino_ota_service();

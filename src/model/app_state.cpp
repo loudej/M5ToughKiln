@@ -247,6 +247,15 @@ void AppState::applyStartStopTap() {
     unlockSt();
 }
 
+void AppState::latchError(std::string message) {
+    lockSt();
+    if (status_.currentState != KilnState::ERROR) {
+        status_.currentState = KilnState::ERROR;
+        status_.frozenControllerError = std::move(message);
+    }
+    unlockSt();
+}
+
 void AppState::setPredefinedProgram(size_t idx, FiringProgram prog) {
     lockSt();
     if (idx < predefinedPrograms_.size())
