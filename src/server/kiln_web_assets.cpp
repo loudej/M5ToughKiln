@@ -89,11 +89,31 @@ const char KILN_WEB_INDEX_HTML[] = R"--HTML--(
       </div>
 
       <div id="progCustomWrap" class="hidden">
-        <div class="prog-muted">Segments (read-only)</div>
         <div id="progCustomSegments" class="prog-seg-list"></div>
+        <button type="button" id="progSegAdd" class="prog-seg-add-btn">Add Segment</button>
       </div>
 
       <button type="button" id="progApply" class="prog-apply-btn">Apply</button>
+    </div>
+  </div>
+
+  <div id="segBackdrop" class="seg-backdrop hidden"></div>
+  <div id="segPanel" class="seg-panel hidden" role="dialog" aria-modal="true">
+    <div class="seg-panel-inner">
+      <div class="seg-hdr">
+        <button type="button" id="segOk" class="seg-ok-btn" aria-label="Save and close">&larr;</button>
+        <h3 id="segTitle" class="seg-title">Segment</h3>
+        <button type="button" id="segDelete" class="seg-del-btn" aria-label="Remove segment">&#x1F5D1;</button>
+      </div>
+      <label class="prog-field"><span class="prog-lbl" id="segTargetLbl">Target Temp</span>
+        <input id="segTarget" type="text" inputmode="decimal" autocomplete="off"/>
+      </label>
+      <label class="prog-field"><span class="prog-lbl" id="segRateLbl">Ramp Rate</span>
+        <input id="segRate" type="text" inputmode="decimal" autocomplete="off"/>
+      </label>
+      <label class="prog-field"><span class="prog-lbl">Soak Time (min)</span>
+        <input id="segSoak" type="number" min="0" step="1"/>
+      </label>
     </div>
   </div>
   <script defer src="/app.js"></script>
@@ -390,13 +410,34 @@ body {
   display:flex;
   flex-direction:column;
   gap:6px;
+  margin-top:4px;
 }
 .prog-seg-row {
+  display:grid;
+  grid-template-columns:auto 1fr 1fr 1fr;
+  align-items:center;
+  gap:10px;
   font-size:.88rem;
-  padding:8px 10px;
-  border-radius:6px;
+  padding:10px 12px;
+  border-radius:8px;
   background:#101218;
   border:1px solid #2d3748;
+  color:#e2e8f0;
+  text-align:left;
+  font-variant-numeric:tabular-nums;
+  cursor:pointer;
+  font-family:inherit;
+}
+.prog-seg-row:hover { background:#161a22; border-color:#3b4a5c; }
+.prog-seg-row .seg-num { color:var(--muted); font-weight:600; }
+.prog-seg-row .seg-cell { white-space:nowrap; }
+.prog-seg-empty {
+  font-size:.86rem;
+  color:var(--muted);
+  padding:10px 12px;
+  border:1px dashed #2d3748;
+  border-radius:8px;
+  background:#0d1015;
 }
 .prog-apply-btn {
   width:100%;
@@ -411,6 +452,75 @@ body {
   font-size:1rem;
 }
 .prog-apply-btn:hover { filter:brightness(1.06); }
+.prog-seg-add-btn {
+  width:100%;
+  margin-top:8px;
+  padding:10px 12px;
+  border:1px solid #3b4a5c;
+  border-radius:8px;
+  background:#0f1318;
+  color:#e2e8f0;
+  font:inherit;
+  cursor:pointer;
+}
+.prog-seg-add-btn:hover { filter:brightness(1.08); }
+
+.seg-backdrop {
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,0.55);
+  z-index:200;
+}
+.seg-panel {
+  position:fixed;
+  inset:0;
+  z-index:201;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:24px;
+  pointer-events:none;
+}
+.seg-panel-inner { pointer-events:auto; }
+.seg-panel.hidden { display:none; }
+.seg-panel-inner {
+  width:min(400px, 100%);
+  max-height:90vh;
+  overflow:auto;
+  background:#181a20;
+  border:1px solid #2d3748;
+  border-radius:12px;
+  padding:14px 18px 18px;
+  box-shadow:0 10px 40px rgba(0,0,0,0.55);
+}
+.seg-hdr {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  margin-bottom:10px;
+  gap:8px;
+}
+.seg-title {
+  margin:0;
+  font-size:1.05rem;
+  flex:1;
+  text-align:center;
+}
+.seg-ok-btn,
+.seg-del-btn {
+  border:none;
+  background:transparent;
+  font-size:1.4rem;
+  cursor:pointer;
+  padding:4px 10px;
+  border-radius:6px;
+  line-height:1;
+}
+.seg-ok-btn { color:#e2e8f0; }
+.seg-ok-btn:hover { background:#262a33; }
+.seg-del-btn { color:#fca5a5; }
+.seg-del-btn:hover { background:#2a1414; }
+.seg-del-btn.hidden { visibility:hidden; }
 )--CSS--";
 
 const char KILN_WEB_APP_JS[] = R"--JS--(
@@ -428,6 +538,12 @@ let tracePollBusy = false;
 let traceChain = Promise.resolve();
 let tapBusy = false;
 let programsData = null;
+/** Selected program index (0..3 predefined, 4+ custom) currently displayed in the panel. */
+let progPanelSelected = 0;
+/** When the segment editor is open: { programIndex, segmentIndex (-1 if new) }. */
+let segEditCtx = null;
+/** Sentinel value for the dropdown "Add New Custom" option. */
+const PROG_ADD_NEW_VALUE = 'add_new_custom';
 
 function programSelectionLocked(j) {
   const ks = (j && j.kilnState) ? j.kilnState : 'idle';
@@ -466,51 +582,66 @@ function fillProgSelect() {
   for (let i = 0; i < cust.length; i++) {
     const p = cust[i];
     const opt = document.createElement('option');
-    opt.value = String(4 + p.index);
+    opt.value = String(4 + i);
     opt.textContent = p.name;
     sel.appendChild(opt);
   }
+  /** Mirrors the touch UI's "Add New Custom" trailing item in the program dropdown. */
+  const addOpt = document.createElement('option');
+  addOpt.value = PROG_ADD_NEW_VALUE;
+  addOpt.textContent = 'Add New Custom';
+  sel.appendChild(addOpt);
 }
 
-function fmtSegNum(x) {
-  if (typeof x !== 'number' || !isFinite(x)) return '--';
-  return String(Math.round(x * 10) / 10);
+function unitSym() {
+  return (programsData && programsData.tempUnit) ? programsData.tempUnit : '';
 }
 
+function currentCustom(idx) {
+  if (idx < 4 || !programsData || !programsData.custom) return null;
+  return programsData.custom[idx - 4] || null;
+}
+
+/** Render compact one-row-per-segment list (matches touch UI's segment buttons). */
 function renderCustomSegments(customIdx) {
   const box = document.getElementById('progCustomSegments');
-  const tu = (programsData && programsData.tempUnit) ? programsData.tempUnit : '';
+  if (!box || !programsData) return;
+  const cust = programsData.custom ? programsData.custom[customIdx] : null;
   box.innerHTML = '';
-  const custList = programsData ? programsData.custom : [];
-  let cust = null;
-  for (let i = 0; i < custList.length; i++) {
-    if (custList[i].index === customIdx) {
-      cust = custList[i];
-      break;
-    }
-  }
-  if (!cust || !cust.segments || !cust.segments.length) {
-    box.textContent = '(no segments)';
+  if (!cust) return;
+  const segs = cust.segments || [];
+  if (!segs.length) {
+    const hint = document.createElement('div');
+    hint.className = 'prog-seg-empty';
+    hint.textContent = 'No segments yet — tap "Add Segment" to create one.';
+    box.appendChild(hint);
     return;
   }
-  for (let i = 0; i < cust.segments.length; i++) {
-    const s = cust.segments[i];
-    const row = document.createElement('div');
-    row.className = 'prog-seg-row mono';
-    row.textContent =
-      '#' +
-      (i + 1) +
-      '  ' +
-      fmtSegNum(s.target) +
-      '\xb0' +
-      tu +
-      '  \xb7  ' +
-      fmtSegNum(s.rate) +
-      '\xb0' +
-      tu +
-      '/h  \xb7  soak ' +
-      s.soakMin +
-      ' min';
+  const u = unitSym();
+  for (let i = 0; i < segs.length; i++) {
+    const s = segs[i];
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'prog-seg-row';
+    const num = document.createElement('span');
+    num.className = 'seg-num';
+    num.textContent = String(i + 1);
+    const t = document.createElement('span');
+    t.className = 'seg-cell';
+    t.textContent = (s.target != null ? s.target : '?') + '\xb0' + u;
+    const r = document.createElement('span');
+    r.className = 'seg-cell';
+    r.textContent = (s.rate != null ? s.rate : '?') + '\xb0' + u + '/h';
+    const sk = document.createElement('span');
+    sk.className = 'seg-cell';
+    sk.textContent = (s.soakMin != null ? s.soakMin : 0) + ' min';
+    row.appendChild(num);
+    row.appendChild(t);
+    row.appendChild(r);
+    row.appendChild(sk);
+    row.addEventListener('click', function () {
+      openSegPanel(4 + customIdx, i);
+    });
     box.appendChild(row);
   }
 }
@@ -520,7 +651,13 @@ function syncFieldsFromProgSelect() {
   const preWrap = document.getElementById('progPredefinedWrap');
   const custWrap = document.getElementById('progCustomWrap');
   if (!sel || !programsData) return;
+  if (sel.value === PROG_ADD_NEW_VALUE) {
+    preWrap.classList.add('hidden');
+    custWrap.classList.add('hidden');
+    return;
+  }
   const idx = parseInt(sel.value, 10);
+  progPanelSelected = idx;
   if (idx <= 3) {
     preWrap.classList.remove('hidden');
     custWrap.classList.add('hidden');
@@ -538,12 +675,43 @@ function syncFieldsFromProgSelect() {
   }
 }
 
+async function onProgSelectChange() {
+  const sel = document.getElementById('progSelect');
+  if (!sel) return;
+  if (sel.value === PROG_ADD_NEW_VALUE) {
+    /** "Add New Custom" — server-side append, then re-select the new program. */
+    sel.disabled = true;
+    try {
+      const r = await fetch('/api/programs/custom/append', { method: 'POST', cache: 'no-store' });
+      if (!r.ok) {
+        let msg = 'Could not add custom program (' + r.status + ').';
+        try { const ej = await r.json(); if (ej && ej.error) msg = ej.error; } catch (e) {}
+        window.alert(msg);
+        sel.value = String(progPanelSelected);
+        return;
+      }
+      const j = await r.json();
+      await fetchProgramsJson();
+      fillProgSelect();
+      const newIdx = 4 + (j.index | 0);
+      sel.value = String(newIdx);
+      progPanelSelected = newIdx;
+      syncFieldsFromProgSelect();
+    } finally {
+      sel.disabled = false;
+    }
+    return;
+  }
+  syncFieldsFromProgSelect();
+}
+
 async function openProgPanel() {
   if (lastStatus && programSelectionLocked(lastStatus)) return;
   await fetchProgramsJson();
   fillProgSelect();
   const sel = document.getElementById('progSelect');
   const ai = programsData.activeIndex;
+  progPanelSelected = ai;
   sel.value = String(ai);
   syncFieldsFromProgSelect();
   document.getElementById('progBackdrop').classList.remove('hidden');
@@ -559,7 +727,15 @@ function closeProgPanel() {
 
 async function applyProgPanel() {
   const sel = document.getElementById('progSelect');
+  if (!sel || sel.value === PROG_ADD_NEW_VALUE) return;
   const ai = parseInt(sel.value, 10);
+  if (ai >= 4) {
+    const cust = currentCustom(ai);
+    if (!cust || !cust.segments || !cust.segments.length) {
+      window.alert('Add at least one segment before applying this custom program.');
+      return;
+    }
+  }
   const payload = { activeIndex: ai };
   if (ai <= 3) {
     payload.cone = document.getElementById('progCone').value.trim();
@@ -574,11 +750,104 @@ async function applyProgPanel() {
     body: JSON.stringify(payload),
   });
   if (!r.ok) {
-    console.warn('programs save failed');
+    let msg = 'Programs save failed (' + r.status + ').';
+    try { const ej = await r.json(); if (ej && ej.error) msg = ej.error; } catch (e) {}
+    window.alert(msg);
     return;
   }
   closeProgPanel();
   await poll();
+}
+
+/** Open the per-segment editor (matches touch ui_edit_segment_popup). */
+function openSegPanel(programIndex, segmentIndex) {
+  const cust = currentCustom(programIndex);
+  if (!cust) return;
+  segEditCtx = { programIndex: programIndex, segmentIndex: segmentIndex };
+  const isNew = segmentIndex < 0;
+  const seg = isNew ? { target: '', rate: '', soakMin: 0 } : (cust.segments[segmentIndex] || {});
+  document.getElementById('segTitle').textContent = isNew ? 'New Segment' : 'Segment ' + (segmentIndex + 1);
+  const u = unitSym();
+  document.getElementById('segTargetLbl').textContent = 'Target Temp (\xb0' + u + ')';
+  document.getElementById('segRateLbl').textContent = 'Ramp Rate (\xb0' + u + '/h)';
+  document.getElementById('segTarget').value = seg.target != null ? String(seg.target) : '';
+  document.getElementById('segRate').value = seg.rate != null ? String(seg.rate) : '';
+  document.getElementById('segSoak').value = seg.soakMin != null ? String(seg.soakMin) : '0';
+  const del = document.getElementById('segDelete');
+  if (del) del.classList.toggle('hidden', isNew);
+  document.getElementById('segBackdrop').classList.remove('hidden');
+  document.getElementById('segPanel').classList.remove('hidden');
+}
+
+function closeSegPanel() {
+  document.getElementById('segBackdrop').classList.add('hidden');
+  document.getElementById('segPanel').classList.add('hidden');
+  segEditCtx = null;
+}
+
+async function saveSegPanel() {
+  if (!segEditCtx) return;
+  const tRaw = document.getElementById('segTarget').value.trim();
+  const rRaw = document.getElementById('segRate').value.trim();
+  const sRaw = document.getElementById('segSoak').value.trim();
+  const t = parseFloat(tRaw.replace(',', '.'));
+  const rt = parseFloat(rRaw.replace(',', '.'));
+  if (!Number.isFinite(t) || !Number.isFinite(rt)) {
+    window.alert('Target and ramp rate must be valid numbers.');
+    return;
+  }
+  const sk = sRaw === '' ? 0 : parseInt(sRaw, 10);
+  if (!Number.isFinite(sk) || sk < 0) {
+    window.alert('Soak time must be a non-negative whole number of minutes.');
+    return;
+  }
+  const programIndex = segEditCtx.programIndex - 4;
+  const body = JSON.stringify({
+    programIndex: programIndex,
+    segmentIndex: segEditCtx.segmentIndex,
+    target: t,
+    rate: rt,
+    soakMin: sk,
+  });
+  const r = await fetch('/api/programs/custom/segment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body,
+  });
+  if (!r.ok) {
+    let msg = 'Could not save segment (' + r.status + ').';
+    try { const ej = await r.json(); if (ej && ej.error) msg = ej.error; } catch (e) {}
+    window.alert(msg);
+    return;
+  }
+  await fetchProgramsJson();
+  fillProgSelect();
+  document.getElementById('progSelect').value = String(progPanelSelected);
+  syncFieldsFromProgSelect();
+  closeSegPanel();
+}
+
+async function deleteSegPanel() {
+  if (!segEditCtx) return;
+  if (segEditCtx.segmentIndex < 0) { closeSegPanel(); return; }
+  const programIndex = segEditCtx.programIndex - 4;
+  const body = JSON.stringify({ programIndex: programIndex, segmentIndex: segEditCtx.segmentIndex });
+  const r = await fetch('/api/programs/custom/segment/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: body,
+  });
+  if (!r.ok) {
+    let msg = 'Could not remove segment (' + r.status + ').';
+    try { const ej = await r.json(); if (ej && ej.error) msg = ej.error; } catch (e) {}
+    window.alert(msg);
+    return;
+  }
+  await fetchProgramsJson();
+  fillProgSelect();
+  document.getElementById('progSelect').value = String(progPanelSelected);
+  syncFieldsFromProgSelect();
+  closeSegPanel();
 }
 
 async function swapProgPrevious() {
@@ -885,7 +1154,23 @@ setInterval(pollTrace, 750);
   const ap = document.getElementById('progApply');
   if (ap) ap.addEventListener('click', applyProgPanel);
   const sel = document.getElementById('progSelect');
-  if (sel) sel.addEventListener('change', syncFieldsFromProgSelect);
+  if (sel) sel.addEventListener('change', onProgSelectChange);
+  const addSeg = document.getElementById('progSegAdd');
+  if (addSeg)
+    addSeg.addEventListener('click', function () {
+      const sel2 = document.getElementById('progSelect');
+      const ai = parseInt(sel2.value, 10);
+      if (ai < 4) return;
+      openSegPanel(ai, -1);
+    });
+
+  /** Segment editor popup wiring (matches touch ui_edit_segment_popup). */
+  const segBd = document.getElementById('segBackdrop');
+  if (segBd) segBd.addEventListener('click', closeSegPanel);
+  const segOk = document.getElementById('segOk');
+  if (segOk) segOk.addEventListener('click', saveSegPanel);
+  const segDel = document.getElementById('segDelete');
+  if (segDel) segDel.addEventListener('click', deleteSegPanel);
 })();
 )--JS--";
 

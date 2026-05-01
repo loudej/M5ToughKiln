@@ -218,6 +218,56 @@ static void handle_api_programs_save() {
     http_log_response(200, sizeof(ok) - 1);
 }
 
+static void handle_api_programs_custom_append() {
+    http_req_begin();
+    String okJson;
+    String err;
+    if (!kiln_programs_append_custom_json(okJson, err)) {
+        const int code = err.indexOf("locked") >= 0 ? 403 : 400;
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(code, "application/json", err);
+        http_log_response(code, err.length());
+        return;
+    }
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", okJson);
+    http_log_response(200, okJson.length());
+}
+
+static void handle_api_programs_custom_segment_upsert() {
+    http_req_begin();
+    String       err;
+    const String body = server.arg("plain");
+    if (!kiln_programs_upsert_segment_json(body, err)) {
+        const int code = err.indexOf("locked") >= 0 ? 403 : 400;
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(code, "application/json", err);
+        http_log_response(code, err.length());
+        return;
+    }
+    const char ok[] = "{\"ok\":true}";
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", ok);
+    http_log_response(200, sizeof(ok) - 1);
+}
+
+static void handle_api_programs_custom_segment_delete() {
+    http_req_begin();
+    String       err;
+    const String body = server.arg("plain");
+    if (!kiln_programs_delete_segment_json(body, err)) {
+        const int code = err.indexOf("locked") >= 0 ? 403 : 400;
+        server.sendHeader("Cache-Control", "no-store");
+        server.send(code, "application/json", err);
+        http_log_response(code, err.length());
+        return;
+    }
+    const char ok[] = "{\"ok\":true}";
+    server.sendHeader("Cache-Control", "no-store");
+    server.send(200, "application/json", ok);
+    http_log_response(200, sizeof(ok) - 1);
+}
+
 static void handle_api_programs_swap() {
     http_req_begin();
     if (!kiln_programs_selection_edit_allowed()) {
@@ -290,6 +340,11 @@ static void register_routes() {
     server.on("/api/control/tap", HTTP_POST, handle_api_control_tap);
     server.on("/api/programs", HTTP_GET, handle_api_programs_get);
     server.on("/api/programs/save", HTTP_POST, handle_api_programs_save);
+    server.on("/api/programs/custom/append", HTTP_POST, handle_api_programs_custom_append);
+    server.on("/api/programs/custom/segment", HTTP_POST, handle_api_programs_custom_segment_upsert);
+    server.on("/api/programs/custom/segment/delete", HTTP_POST,
+              handle_api_programs_custom_segment_delete);
+    server.on("/api/programs/swap-previous", HTTP_POST, handle_api_programs_swap);
     server.on("/settings", HTTP_GET, handle_settings_page);
     server.on("/api/settings", HTTP_GET, handle_api_settings_get);
     server.on("/api/settings/save", HTTP_POST, handle_api_settings_save);

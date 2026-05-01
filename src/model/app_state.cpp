@@ -239,7 +239,11 @@ void AppState::setActiveProgramName(std::string name) {
 void AppState::applyStartStopTap() {
     lockSt();
     if (status_.currentState == KilnState::IDLE) {
-        status_.currentState = KilnState::RAMPING;
+        // Seed targetTemperature to currentTemperature so the supervisor's K-106 (ramp hard
+        // stop, debounce 0) doesn't fire on the stale default before the firing controller
+        // task runs alignArmScheduleToMeasured() and writes the real setpoint.
+        status_.targetTemperature = status_.currentTemperature;
+        status_.currentState      = KilnState::RAMPING;
     } else {
         status_.currentState = KilnState::IDLE;
         status_.frozenControllerError.clear();
@@ -304,7 +308,10 @@ bool AppState::eraseCustomSegment(size_t programIndex, size_t segmentIndex) {
 
 void AppState::setKilnStateFromProgramConfigStart() {
     lockSt();
-    status_.currentState = KilnState::RAMPING;
+    // Same reason as applyStartStopTap(): pre-seed target so the supervisor's K-106 hard stop
+    // doesn't fire on the stale target before the controller task aligns to the schedule.
+    status_.targetTemperature = status_.currentTemperature;
+    status_.currentState      = KilnState::RAMPING;
     unlockSt();
 }
 
