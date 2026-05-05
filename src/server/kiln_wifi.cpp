@@ -1,9 +1,11 @@
 #include "kiln_wifi.h"
 #include "../service/preferences_persistence.h"
 
+#include <M5Unified.h>
 #include <WiFi.h>
 #include <Arduino.h>
 #include <algorithm>
+#include <cstring>
 #include <unordered_map>
 
 #ifndef WIFI_SCAN_RUNNING
@@ -154,7 +156,10 @@ void kiln_wifi_request_join(const std::string& ssid, const std::string& pass) {
     s_join_pass = pass;
     s_phase     = ConnPhase::Disconnecting;
     s_phase_ms  = millis();
-    WiFi.disconnect(false);
+    // disconnect(wifioff=false, eraseap=true): keep the radio on, but wipe the cached
+    // SSID/BSSID from NVS so ESP-IDF picks fresh next association instead of reusing
+    // the previous BSSID (which may now be the weakest mesh node).
+    WiFi.disconnect(false, true);
 }
 
 void kiln_wifi_service() {
@@ -166,7 +171,37 @@ void kiln_wifi_service() {
             if (st == WL_DISCONNECTED || millis() - s_phase_ms > 900) {
                 WiFi.mode(WIFI_STA);
                 WiFi.setAutoReconnect(true);
-                WiFi.begin(s_join_ssid.c_str(), s_join_pass.c_str());
+
+                // Blocking scan to find the strongest BSSID for s_join_ssid. Adds a few seconds
+                // to a join, which is acceptable here since this only runs at boot or on an
+                // explicit reconnect — never while the kiln is firing.
+                uint8_t best_bssid[6] = {0};
+                bool    found_bssid   = false;
+                int     best_rssi     = -127;
+                const int n = WiFi.scanNetworks(false, false, false, 300);
+                for (int i = 0; i < n; ++i) {
+                    if (s_join_ssid == WiFi.SSID(i).c_str() && WiFi.RSSI(i) > best_rssi) {
+                        best_rssi   = WiFi.RSSI(i);
+                        memcpy(best_bssid, WiFi.BSSID(i), 6);
+                        found_bssid = true;
+                    }
+                }
+                WiFi.scanDelete();
+
+                if (found_bssid) {
+                    M5.Log.printf("[Wi-Fi] joining %s on BSSID "
+                                  "%02x:%02x:%02x:%02x:%02x:%02x rssi=%d\n",
+                                  s_join_ssid.c_str(),
+                                  best_bssid[0], best_bssid[1], best_bssid[2],
+                                  best_bssid[3], best_bssid[4], best_bssid[5],
+                                  best_rssi);
+                    WiFi.begin(s_join_ssid.c_str(), s_join_pass.c_str(), 0, best_bssid);
+                } else {
+                    M5.Log.printf("[Wi-Fi] joining %s — no scan result, fallback to any BSSID\n",
+                                  s_join_ssid.c_str());
+                    WiFi.begin(s_join_ssid.c_str(), s_join_pass.c_str());
+                }
+
                 s_phase    = ConnPhase::Connecting;
                 s_phase_ms = millis();
             }
@@ -181,6 +216,41 @@ void kiln_wifi_service() {
             break;
         default:
             break;
+    }
+
+    // Periodic roaming: every 2 minutes, scan asynchronously for a stronger node on the
+    // same SSID. If one is at least 8 dBm better than the current link, kick a reconnect
+    // (which will run the Fix 2 BSSID-targeted scan in the Disconnecting handler). The
+    // 8 dBm hysteresis prevents thrashing between two nodes with similar signal.
+    static uint32_t s_roam_check_ms     = 0;
+    static bool     s_roam_scan_pending = false;
+
+    if (s_phase == ConnPhase::Idle && WiFi.status() == WL_CONNECTED) {
+        const uint32_t now = millis();
+        if (now - s_roam_check_ms >= 120000) {
+            s_roam_check_ms     = now;
+            kiln_wifi_scan_request_async();
+            s_roam_scan_pending = true;
+        }
+    }
+
+    if (s_roam_scan_pending) {
+        std::vector<KilnWifiNetwork> scratch;
+        if (kiln_wifi_take_completed_async_scan(scratch)) {
+            s_roam_scan_pending     = false;
+            const int   current_rssi = WiFi.RSSI();
+            const std::string cur_ssid = WiFi.SSID().c_str();
+            int best_rssi = current_rssi;
+            for (const auto& net : scratch) {
+                if (net.ssid == cur_ssid && net.rssi > best_rssi)
+                    best_rssi = net.rssi;
+            }
+            if (best_rssi > current_rssi + 8) {
+                M5.Log.printf("[Wi-Fi] roaming: current rssi=%d, best=%d on %s — reconnecting\n",
+                              current_rssi, best_rssi, cur_ssid.c_str());
+                kiln_wifi_request_join(s_join_ssid, s_join_pass);
+            }
+        }
     }
 }
 
